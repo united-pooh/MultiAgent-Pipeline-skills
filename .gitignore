@@ -2,3 +2,4 @@
 .idea/
 /agent
 .ccagent/
+.env.local
