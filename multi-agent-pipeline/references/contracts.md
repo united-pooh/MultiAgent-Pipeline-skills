@@ -1,11 +1,11 @@
 # JSON Contract Schemas
 
-All inter-agent communication uses these strict JSON schemas. Every agent must validate its input and produce output that conforms exactly to these schemas.
+All canonical pipeline artifacts are written by the orchestrator into `.pipeline-workspace/`. Subagents return JSON matching these contracts; the orchestrator validates and persists them.
 
 ## spec.json
 
-Produced by: **Spec Agent**
-Consumed by: **Plan Agent**, **Architecture Agent**, **Execution Agent**, **Review Agent**
+Produced by: **Spec Agent**  
+Consumed by: **Plan Agent**, **Architecture Agent**, **Execution Agent**, **Review Agent**, **Doc Agent**
 
 ```json
 {
@@ -28,23 +28,28 @@ Consumed by: **Plan Agent**, **Architecture Agent**, **Execution Agent**, **Revi
   "out_of_scope": [
     "string — explicitly excluded items"
   ],
+  "assumptions": [
+    "string — reasonable assumptions made to avoid blocking"
+  ],
   "input_type": "natural_language | document",
   "original_input_summary": "string — distilled version of the user's original input"
 }
 ```
 
 ### Field Rules
+
 - `id`: Sequential, prefixed with `REQ-`. Start from `REQ-001`.
 - `priority`: Every requirement must have one. Default to `must-have` if unclear.
 - `acceptance_criteria`: At least one per requirement. Must be objectively verifiable.
 - `constraints`: Include backward compatibility, performance budgets, or API contracts that must not break.
 - `out_of_scope`: Helps downstream agents avoid scope creep.
+- `assumptions`: Use for low-risk inferences that the orchestrator can surface if needed. Empty array when not needed.
 
 ---
 
 ## plan.json
 
-Produced by: **Plan Agent**
+Produced by: **Plan Agent**  
 Consumed by: **Architecture Agent**, **Execution Agent**
 
 ```json
@@ -74,18 +79,19 @@ Consumed by: **Architecture Agent**, **Execution Agent**
 ```
 
 ### Field Rules
+
 - `id`: Tasks use `TASK-NNN`, phases use `PHASE-N`.
 - `depends_on`: References other task IDs. Empty array if no dependencies.
 - `execution_order`: Flattened topological sort of all tasks respecting dependencies.
 - `target_files`: Best-effort list of files that will be touched. Architecture Agent may refine this.
-- `risk_items`: At least one entry. If no risks identified, state "No significant risks identified" with rationale.
+- `risk_items`: At least one entry. If no significant risks exist, say so explicitly with rationale.
 
 ---
 
 ## architecture.json
 
-Produced by: **Architecture Agent**
-Consumed by: **Execution Agent**, **Review Agent**
+Produced by: **Architecture Agent**  
+Consumed by: **Execution Agent**, **Review Agent**, **Doc Agent**
 
 ```json
 {
@@ -115,29 +121,77 @@ Consumed by: **Execution Agent**, **Review Agent**
   ],
   "feasibility": "feasible | infeasible",
   "infeasibility_reason": "string | null — required if infeasible",
-  "rollback_notes": "string | null — what the user needs to reconsider if infeasible"
+  "rollback_notes": "string | null — required if infeasible",
+  "recommended_next_stage": "execution | plan | null",
+  "rework_reason": "string | null"
 }
 ```
 
 ### Field Rules
-- `decision`: Choose based on analysis — `incremental` for small changes that fit current architecture, `refactor` for structural changes needed, `hybrid` for targeted refactoring combined with incremental additions.
-- `feasibility`: Set to `infeasible` only when the current architecture fundamentally cannot support the feature without changes that would violate stated constraints.
+
+- `decision`: Choose based on analysis — `incremental` for small changes that fit current structure, `refactor` for structural changes, `hybrid` for mixed cases.
+- `feasibility`: Set to `infeasible` only when delivery would violate stated constraints or require unreasonable restructuring.
 - `infeasibility_reason` and `rollback_notes`: Must be non-null when `feasibility` is `infeasible`. Must be `null` when `feasible`.
-- `dependency_changes`: Empty array if no dependency changes needed.
+- `dependency_changes`: Empty array if no dependency changes are needed.
+- `recommended_next_stage`: Use `execution` when the architecture is ready to implement, `plan` when the plan must be redone before execution, and `null` when the architecture is infeasible and the pipeline must stop for user intervention.
+- `rework_reason`: Required when `recommended_next_stage = "plan"`. Must be `null` when `recommended_next_stage = "execution"` unless the Architecture Agent is documenting non-blocking follow-up notes.
 
 ---
 
-## Individual Reviewer Output: `review_individual_N.json`
+## execution-report.json
 
-Produced by: **Each of the 3 Review Agents**
-Consumed by: **Orchestrator** (for EME aggregation)
+Produced by: **Execution Agent**  
+Consumed by: **Review Agent**, **Doc Agent**, **Orchestrator**
 
-Each reviewer independently produces this structure:
+```json
+{
+  "version": "1.0",
+  "iteration": 1,
+  "status": "implemented | blocked",
+  "recommended_next_stage": "review | architecture | plan",
+  "rework_reason": "string | null",
+  "changed_files": ["string — repo-relative file paths"],
+  "requirements_covered": ["REQ-001"],
+  "tests_run": [
+    {
+      "command": "string — exact command",
+      "status": "passed | failed | not_run",
+      "details": "string — concise outcome"
+    }
+  ],
+  "follow_up_notes": [
+    "string — risks, caveats, or rationale"
+  ],
+  "blockers": [
+    "string — required when status is blocked"
+  ]
+}
+```
+
+### Field Rules
+
+- `iteration`: Starts at 1 and matches the current execution/review loop.
+- `status`: `implemented` when code is ready for review; `blocked` when the worker cannot proceed.
+- `recommended_next_stage`: `review` when `status = "implemented"`. When `status = "blocked"`, must be `architecture` or `plan`.
+- `rework_reason`: Required when `status = "blocked"`. Must be `null` when `status = "implemented"`.
+- `changed_files`: Must reflect actual touched files.
+- `requirements_covered`: Reference requirement IDs from `spec.json`.
+- `tests_run`: Include every command attempted. Use `not_run` only when a test was intentionally skipped.
+- `blockers`: Empty array when `status` is `implemented`.
+
+---
+
+## Individual Reviewer Output: review_individual_N.json
+
+Produced by: **Each Review Agent**  
+Consumed by: **Orchestrator**
 
 ```json
 {
   "version": "1.0",
   "reviewer_id": 1,
+  "recommended_next_stage": "execution | architecture | plan | null",
+  "rework_reason": "string | null",
   "pre_results": [
     {
       "criterion": "Correctness | Security | Performance | Error Handling | Code Quality | Architecture Compliance | Test Coverage | Backward Compatibility",
@@ -149,18 +203,28 @@ Each reviewer independently produces this structure:
 }
 ```
 
+### Field Rules
+
+- `pre_results`: Exactly 8 entries, one per rubric dimension, in rubric order.
+- `recommended_next_stage`: `null` when the reviewer sees no blocking issue. On a blocking review, use `execution` for implementation mistakes, `architecture` for architecture-level issues, and `plan` for planning/phase/ownership issues.
+- `rework_reason`: Required when `recommended_next_stage` is not `null`. Must be `null` when `recommended_next_stage = null`.
+- `suggestion`: Required for every `fail` and `warning`. Must be `null` for `pass`.
+
 ---
 
-## review_feedback.json (EME Aggregated)
+## review_feedback.json
 
-Produced by: **Orchestrator** (after merging 3 reviewer outputs via majority vote)
-Consumed by: **Execution Agent** (on fail)
+Produced by: **Orchestrator**  
+Consumed by: **Execution Agent**, **Doc Agent**
 
 ```json
 {
   "version": "1.0",
   "iteration": 1,
+  "mode": "EME | PRE",
   "verdict": "pass | fail",
+  "recommended_next_stage": "execution | architecture | plan | null",
+  "rework_reason": "string | null",
   "eme_votes": [
     {
       "criterion": "Correctness",
@@ -178,16 +242,47 @@ Consumed by: **Execution Agent** (on fail)
     }
   ],
   "summary": "string — overall assessment in 2-3 sentences",
-  "blocking_issues_count": 0
+  "blocking_issues_count": 0,
+  "warnings": [
+    "string — preserved non-blocking concerns"
+  ]
 }
 ```
 
 ### Field Rules
-- `eme_votes`: Exactly 8 entries, one per PRE dimension. Shows all 3 votes and the majority result.
-- `final_score`: Determined by majority vote. `warning` counts as `pass` for voting. 2/3 or 3/3 in the same direction wins.
-- `consensus`: `"unanimous"` if 3/3 agree, `"majority"` if 2/3.
-- `merged_issues`: Only present when `verdict` is `"fail"`. Contains all issues from all reviewers that contributed to failing dimensions. Deduplicate overlapping issues but preserve unique findings.
-- `flagged_by`: Array of `reviewer_id`s that identified this issue.
-- `verdict`: `"pass"` only when all 8 dimensions pass after voting.
-- `iteration`: Increments with each review cycle. Starts at 1.
-- `blocking_issues_count`: Count of dimensions with `final_score: "fail"`. Must be 0 for `verdict: "pass"`.
+
+- `mode`: `EME` for 3-reviewer majority vote, `PRE` for a single reviewer.
+- `recommended_next_stage`: `null` when `verdict = "pass"`. When `verdict = "fail"`, use `execution`, `architecture`, or `plan` based on the dominant root cause after review aggregation.
+- `rework_reason`: Required when `verdict = "fail"`. Must be `null` when `verdict = "pass"`.
+- `eme_votes`: Exactly 8 entries in `EME`; in `PRE`, still emit 8 entries with a single repeated vote so downstream stages keep one shape.
+- `final_score`: Determined by majority vote. `warning` counts as `pass` for voting.
+- `consensus`: `"unanimous"` if all effective votes agree, otherwise `"majority"`.
+- `merged_issues`: Empty array when `verdict` is `pass`.
+- `verdict`: `pass` only when all 8 dimensions pass after aggregation.
+- `blocking_issues_count`: Count of dimensions with `final_score = "fail"`.
+- `warnings`: Preserve non-blocking review concerns even on pass.
+
+---
+
+## doc-report.json
+
+Produced by: **Doc Agent**  
+Consumed by: **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "status": "updated | no_changes_needed",
+  "updated_files": ["string — repo-relative documentation paths"],
+  "summary": "string — what changed for users or maintainers",
+  "notes": [
+    "string — rationale or follow-up documentation gaps"
+  ]
+}
+```
+
+### Field Rules
+
+- `updated_files`: Empty array only when `status` is `no_changes_needed`.
+- `summary`: Required even when no docs changed.
+- `notes`: Use for deferred docs work or style constraints discovered during editing.
