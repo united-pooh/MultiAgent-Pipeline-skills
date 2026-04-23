@@ -1,5 +1,2 @@
-.gocache/
-.idea/
-/agent
-.ccagent/
-.env.local
+.DS_Store
+.pipeline-workspace/
