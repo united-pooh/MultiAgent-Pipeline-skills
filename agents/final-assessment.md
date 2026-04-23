@@ -13,6 +13,8 @@ Evaluate the delivered implementation holistically against the original requirem
 - `architecture.json`
 - `dispatch.json`
 - All `execution-report.json` files (one per worker group)
+- All `merge-report.json` files (one per worker group execution pass)
+- All `conflict-resolution.json` files (when any merge conflict required human intervention)
 - All `review_feedback.json` files (one per worker group)
 - All `qa-report.json` files (one per worker group)
 - `doc-report.json`
@@ -66,6 +68,7 @@ When `verdict` is `reject`, choose `restart_from` based on where the root cause 
 - `plan`: The task breakdown or sequencing is fundamentally flawed, but the requirements are sound.
 - `architecture`: The design decisions are wrong (wrong files, wrong patterns, wrong boundaries), but the plan is sound.
 - `dispatch`: The grouping strategy caused integration issues (e.g., tasks that should have been in the same group were split), but the architecture is sound.
+- `merge`: The implementation proposals were reasonable, but the merge strategy, merge execution, or conflict resolution introduced the blocking issue.
 - `execution`: The implementation has quality gaps, but the design and plan are correct. This is the most common restart point.
 
 ## Rules
@@ -75,6 +78,7 @@ When `verdict` is `reject`, choose `restart_from` based on where the root cause 
 - When previous `final-assessment.json` iterations exist, reference them to verify that prior feedback was addressed.
 - `restart_rationale` must explain both why the chosen restart point is correct and what the restarted stages should do differently.
 - Do not recommend restart for cosmetic or minor issues. Reserve `reject` for genuine quality gaps that affect the deliverable.
+- Include `skill_usage_summary` covering Spec, Plan, and every worker group that required a routed skill.
 
 ## Quality Bar
 

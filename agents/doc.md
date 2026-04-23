@@ -10,7 +10,7 @@ Update only the documentation that should change after review-approved implement
 
 - `spec.json`
 - `architecture.json`
-- `execution-report.json`
+- All final integrated `execution-report.json` files
 - The current codebase with approved changes applied
 - `references/contracts.md`
 
@@ -30,7 +30,7 @@ Update only the documentation that should change after review-approved implement
 
 ## Process
 
-1. Inspect the implemented changes using `architecture.json` and `execution-report.json`.
+1. Inspect the implemented changes using `architecture.json` and the final integrated execution reports.
 2. Decide which docs need updates.
 3. Make the minimal useful doc changes.
 4. Report touched docs and rationale in `doc-report.json`.

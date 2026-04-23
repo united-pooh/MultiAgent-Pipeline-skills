@@ -1,6 +1,6 @@
 # JSON Contract Schemas
 
-All canonical pipeline artifacts are written by the orchestrator into `.pipeline-workspace/`. Subagents return JSON matching these contracts; the orchestrator validates and persists them.
+All canonical pipeline artifacts are written by the orchestrator into `.pipeline-workspace/`, except `.pipeline-last-run-summary.json`, which lives at the repository root. Subagents return JSON matching these contracts; the orchestrator validates and persists them.
 
 ## spec.json
 
@@ -10,6 +10,7 @@ Consumed by: **Plan Agent**, **Architecture Agent**, **Dispatch Agent**, **Execu
 ```json
 {
   "version": "1.0",
+  "applied_skills": ["superpowers"],
   "feature_name": "string — concise feature title",
   "objective": "string — one-paragraph goal description",
   "requirements": [
@@ -38,6 +39,7 @@ Consumed by: **Plan Agent**, **Architecture Agent**, **Dispatch Agent**, **Execu
 
 ### Field Rules
 
+- `applied_skills`: Must include `superpowers` exactly once for this pipeline.
 - `id`: Sequential, prefixed with `REQ-`. Start from `REQ-001`.
 - `priority`: Every requirement must have one. Default to `must-have` if unclear.
 - `acceptance_criteria`: At least one per requirement. Must be objectively verifiable.
@@ -55,6 +57,7 @@ Consumed by: **Architecture Agent**, **Dispatch Agent**, **Execution Agent**, **
 ```json
 {
   "version": "1.0",
+  "applied_skills": ["superpowers"],
   "spec_ref": "spec.json",
   "phases": [
     {
@@ -80,6 +83,7 @@ Consumed by: **Architecture Agent**, **Dispatch Agent**, **Execution Agent**, **
 
 ### Field Rules
 
+- `applied_skills`: Must include `superpowers` exactly once for this pipeline.
 - `id`: Tasks use `TASK-NNN`, phases use `PHASE-N`.
 - `depends_on`: References other task IDs. Empty array if no dependencies.
 - `execution_order`: Flattened topological sort of all tasks respecting dependencies.
@@ -109,7 +113,8 @@ Consumed by: **Dispatch Agent**, **Execution Agent**, **Review Agent**, **QA Age
     {
       "target": "string — file path",
       "change_type": "modify | create | delete | move",
-      "description": "string — what changes and why"
+      "description": "string — what changes and why",
+      "concerns": ["frontend_design"]
     }
   ],
   "dependency_changes": [
@@ -128,6 +133,8 @@ Consumed by: **Dispatch Agent**, **Execution Agent**, **Review Agent**, **QA Age
 ### Field Rules
 
 - `decision`: Choose based on analysis — `incremental` for small changes that fit current structure, `refactor` for structural changes, `hybrid` for mixed cases.
+- `proposed_changes[].concerns`: Use `frontend_design` when a change affects page layouts, components, styles, themes, design tokens, animation, interaction copy, responsive layout, visual hierarchy, design-system consistency, or UI accessibility. Use an empty array when no skill-routing concern exists.
+- `concerns`: Routing concerns are assigned only by Architecture. Downstream stages must not re-infer them.
 - `feasibility`: Set to `infeasible` only when delivery would violate stated constraints or require unreasonable restructuring.
 - `infeasibility_reason` and `rollback_notes`: Must be non-null when `feasibility` is `infeasible`. Must be `null` when `feasible`.
 - `dependency_changes`: Empty array if no dependency changes are needed.
@@ -150,7 +157,8 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
       "group_id": "GROUP-1",
       "tasks": ["TASK-001", "TASK-003"],
       "owned_files": ["src/handler.go", "src/handler_test.go"],
-      "depends_on_groups": []
+      "depends_on_groups": [],
+      "required_skills": ["ce-frontend-design"]
     }
   ],
   "execution_waves": [
@@ -159,6 +167,11 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
       "groups": ["GROUP-1", "GROUP-2"]
     }
   ],
+  "integration_strategy": {
+    "merge_mode": "three_way",
+    "conflict_policy": "pause_for_human",
+    "base_strategy": "wave_start_snapshot"
+  },
   "rationale": "string — explanation of grouping decisions and any tradeoffs"
 }
 ```
@@ -167,7 +180,9 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
 
 - `worker_groups`: Each group contains one or more tasks from `plan.json` and the files those tasks own, derived from `architecture.json.proposed_changes`. No file may appear in more than one group's `owned_files` within the same execution wave.
 - `depends_on_groups`: References other group IDs. A group can only begin execution after all groups it depends on have completed. Empty array when no inter-group dependency exists.
+- `required_skills`: Deterministic union of `concerns` for the files owned by that group. Map `frontend_design` to `ce-frontend-design`. Use an empty array when no routed skill is required.
 - `execution_waves`: Groups with no unresolved `depends_on_groups` run in the same wave. Waves execute sequentially; groups within a wave execute concurrently. At least one wave must be produced.
+- `integration_strategy`: Must always be `{ "merge_mode": "three_way", "conflict_policy": "pause_for_human", "base_strategy": "wave_start_snapshot" }` in this pipeline version.
 - `rationale`: A plain-language explanation of why the tasks were grouped this way and what tradeoffs were made.
 
 ---
@@ -175,16 +190,29 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
 ## execution-report.json
 
 Produced by: **Execution Agent**  
-Consumed by: **Review Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**, **Orchestrator**
+Consumed by: **Merge Stage**, **Review Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**, **Orchestrator**
 
 ```json
 {
   "version": "1.0",
   "group_id": "GROUP-1",
   "iteration": 1,
+  "base_ref": "bases/wave-1-group-1-base.json",
+  "proposal_ref": "worker://GROUP-1/iteration-1",
+  "applied_skills": ["ce-frontend-design"],
   "status": "implemented | blocked",
   "changed_files": ["string — repo-relative file paths"],
   "requirements_covered": ["REQ-001"],
+  "frontend_design_summary": {
+    "system_mode": "existing_system | partial_system | greenfield | ambiguous",
+    "visual_thesis": "string — one-sentence visual direction",
+    "content_plan": "string — concise page or component structure plan",
+    "interaction_plan": [
+      "string — specific motion or interaction idea"
+    ],
+    "visual_verification_method": "string — screenshot, Playwright, mental review, or skip reason",
+    "visual_verification_result": "string — what was verified or why it was skipped"
+  },
   "tests_run": [
     {
       "command": "string — exact command",
@@ -204,12 +232,84 @@ Consumed by: **Review Agent**, **QA Agent**, **Doc Agent**, **Final Assessment A
 ### Field Rules
 
 - `group_id`: Must match one entry in `dispatch.json.worker_groups[].group_id`.
-- `iteration`: Starts at 1 and matches the current execution/review loop.
-- `status`: `implemented` when code is ready for review; `blocked` when the worker cannot proceed.
+- `iteration`: Starts at 1 and matches the current execution/merge/review loop.
+- `base_ref`: Reference to the wave-start snapshot used by the orchestrator for three-way merge.
+- `proposal_ref`: Reference to the worker proposal the orchestrator will merge. It may point to an uploaded patch, fork workspace handle, or equivalent proposal artifact.
+- `applied_skills`: Include `ce-frontend-design` when `dispatch.json.worker_groups[].required_skills` includes it. Otherwise use an empty array.
+- `status`: `implemented` means the proposal is ready for merge. `blocked` means the worker cannot proceed.
 - `changed_files`: Must reflect actual touched files.
 - `requirements_covered`: Reference requirement IDs from `spec.json`.
+- `frontend_design_summary`: Must be non-null when `applied_skills` includes `ce-frontend-design`. Must be `null` when no frontend-design routing applied.
 - `tests_run`: Include every command attempted. Use `not_run` only when a test was intentionally skipped.
 - `blockers`: Empty array when `status` is `implemented`.
+
+---
+
+## merge-report.json
+
+Produced by: **Orchestrator (Merge Stage)**
+Consumed by: **Review Agent**, **QA Agent**, **Final Assessment Agent**, **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "base_ref": "bases/wave-1-group-1-base.json",
+  "mainline_ref": "workspace://main-before-merge",
+  "proposal_ref": "worker://GROUP-1/iteration-1",
+  "result_ref": "workspace://main-after-merge",
+  "status": "merged | conflicted | noop",
+  "conflicts": [
+    {
+      "file": "src/app.tsx",
+      "format": "text | json | yaml | binary | spreadsheet | presentation | image | other",
+      "conflict_type": "same_hunk | same_key | array_conflict | binary_conflict | manual_only | other",
+      "summary": "string — concise description of what collided",
+      "left_ref": "string — proposal-side reference",
+      "right_ref": "string — mainline-side reference",
+      "base_ref": "string — conflict base reference"
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- `status`: `merged` when three-way merge completed safely, `noop` when the proposal produced no effective change, `conflicted` when merge must pause for human resolution.
+- `result_ref`: Reference to the merged mainline snapshot or conflict bundle produced by the merge stage.
+- `conflicts`: Must be empty when `status` is `merged` or `noop`. Must contain at least one entry when `status` is `conflicted`.
+- Re-running merge with the same `{base_ref, mainline_ref, proposal_ref}` must produce the same `status` and materially equivalent `conflicts`.
+
+---
+
+## conflict-resolution.json
+
+Produced by: **Human Orchestrator Flow**
+Consumed by: **Final Assessment Agent**, **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "merge_report_ref": "merge/GROUP-1/iteration-1-merge-report.json",
+  "resolver": "string — person, role, or automation that resolved the conflict",
+  "resolution_summary": "string — what was decided and why",
+  "resolved_files": ["src/app.tsx"],
+  "validation_run": [
+    {
+      "command": "string — exact command or manual verification step",
+      "status": "passed | failed | not_run",
+      "details": "string — concise outcome"
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- `merge_report_ref`: Must point to a `merge-report.json` whose `status` is `conflicted`.
+- `resolved_files`: List every file touched during manual conflict resolution.
+- `validation_run`: Record the checks performed before resuming from the merge point.
 
 ---
 
@@ -222,6 +322,7 @@ Consumed by: **Orchestrator**
 {
   "version": "1.0",
   "reviewer_id": 1,
+  "applied_skills": ["ce-frontend-design"],
   "pre_results": [
     {
       "criterion": "Correctness | Security | Performance | Error Handling | Code Quality | Architecture Compliance | Test Coverage | Backward Compatibility",
@@ -229,20 +330,32 @@ Consumed by: **Orchestrator**
       "evidence": "string — specific file:line references and explanation",
       "suggestion": "string | null — fix recommendation, required for fail/warning"
     }
-  ]
+  ],
+  "frontend_design_assessment": {
+    "system_fit": "pass | fail | warning",
+    "interaction_quality": "pass | fail | warning",
+    "ui_accessibility": "pass | fail | warning",
+    "verification_method": "string — screenshot, browser tooling, mental review, or skip reason",
+    "notes": [
+      "string — concrete frontend design observations"
+    ]
+  }
 }
 ```
 
 ### Field Rules
 
+- `applied_skills`: Include `ce-frontend-design` when the reviewed group required that skill. Otherwise use an empty array.
 - `pre_results`: Exactly 8 entries, one per rubric dimension, in rubric order.
 - `suggestion`: Required for every `fail` and `warning`. Must be `null` for `pass`.
+- `frontend_design_assessment`: Must be non-null when `applied_skills` includes `ce-frontend-design`. Must be `null` otherwise.
+- Frontend-design findings must also be reflected in the relevant PRE dimensions. This object supplements review evidence; it does not replace PRE scoring.
 
 ---
 
 ## review_feedback.json
 
-Produced by: **Orchestrator**  
+Produced by: **Orchestrator**
 Consumed by: **Execution Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**
 
 ```json
@@ -383,8 +496,18 @@ Consumed by: **Orchestrator**
       "recommendation": "string — what should change next"
     }
   ],
-  "restart_from": "spec | plan | architecture | dispatch | execution | null",
+  "restart_from": "spec | plan | architecture | dispatch | merge | execution | null",
   "restart_rationale": "string | null — why this restart point is correct",
+  "skill_usage_summary": [
+    {
+      "scope": "spec | plan | GROUP-1/execution | GROUP-1/review",
+      "required_skills": ["superpowers"],
+      "applied_skills": ["superpowers"],
+      "issues": [
+        "string — missing, extra, or misapplied skill usage"
+      ]
+    }
+  ],
   "summary": "string — final delivery assessment in 2-3 sentences"
 }
 ```
@@ -396,6 +519,59 @@ Consumed by: **Orchestrator**
 - `score`: Use `strong`, `adequate`, or `weak` exactly as defined in `agents/final-assessment.md`.
 - `evidence`: Must cite concrete signals from code, tests, docs, or upstream artifacts. Do not leave this as a generic summary.
 - `improvement_areas`: May be empty on a clean accept. On `accept`, keep only non-blocking recommendations. On `reject`, include every gap that materially contributed to rejection or must be addressed on restart.
-- `restart_from`: Must be `null` when `verdict` is `accept`. Must be one of `spec`, `plan`, `architecture`, `dispatch`, or `execution` when `verdict` is `reject`.
+- `restart_from`: Must be `null` when `verdict` is `accept`. Must be one of `spec`, `plan`, `architecture`, `dispatch`, `merge`, or `execution` when `verdict` is `reject`.
 - `restart_rationale`: Must be `null` when `verdict` is `accept`. Must be non-null when `verdict` is `reject` and explain why the chosen restart stage is the earliest correct recovery point.
+- `skill_usage_summary`: Include at least Spec, Plan, and every worker-group stage that required a routed skill. Use `issues = []` when usage matched the requirement.
 - `summary`: Required for every verdict and should stay within 2-3 sentences.
+
+---
+
+## .pipeline-last-run-summary.json
+
+Produced by: **Orchestrator**
+Consumed by: **Orchestrator**, **Humans**
+
+```json
+{
+  "version": "1.0",
+  "run_id": "RUN-20260423-001",
+  "completed_at": "2026-04-23T12:34:56Z",
+  "verdict": "accept | reject | pause_for_human",
+  "restart_from": "spec | plan | architecture | dispatch | merge | execution | null",
+  "skill_usage_summary": [
+    {
+      "scope": "spec | plan | GROUP-1/execution | GROUP-1/review",
+      "required_skills": ["superpowers"],
+      "applied_skills": ["superpowers"],
+      "issues": []
+    }
+  ],
+  "merge_summary": {
+    "merged_groups": ["GROUP-1"],
+    "conflicted_groups": [],
+    "noop_groups": []
+  },
+  "qa_summary": [
+    {
+      "group_id": "GROUP-1",
+      "status": "pass | fail"
+    }
+  ],
+  "cleanup_summary": {
+    "deleted_workspace": true,
+    "deleted_paths": [".pipeline-workspace"],
+    "retained_file": ".pipeline-last-run-summary.json"
+  }
+}
+```
+
+### Field Rules
+
+- `run_id`: Stable identifier for the terminal run being summarized.
+- `completed_at`: ISO-8601 timestamp for when the terminal run finished or paused.
+- `verdict`: `accept` when the run completed successfully, `reject` when Final Assessment rejected the delivery, `pause_for_human` when the pipeline stopped at merge for manual resolution.
+- `restart_from`: Mirrors the earliest safe restart point for rejected or paused runs. Use `null` for accepted runs.
+- `skill_usage_summary`: Reuse the same shape as `final-assessment.json.skill_usage_summary`.
+- `cleanup_summary.deleted_workspace`: `true` only when cleanup deleted `.pipeline-workspace/`.
+- `cleanup_summary.deleted_paths`: Must list what was actually deleted. Use an empty array when the workspace was preserved.
+- `cleanup_summary.retained_file`: Must be `.pipeline-last-run-summary.json`.

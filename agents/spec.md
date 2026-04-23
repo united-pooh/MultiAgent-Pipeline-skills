@@ -16,6 +16,13 @@ Turn the user's request into a precise `spec.json` artifact that downstream stag
 
 Return exactly one fenced `json` block with a `spec.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
 
+## Planning Skill Requirement
+
+- The orchestrator must explicitly attach the `superpowers` skill name and current-environment path in your prompt.
+- Use only the skill's brainstorming and planning discipline.
+- Do not execute `superpowers` build, TDD, commit, branch-finishing, or code-writing behaviors in this stage.
+- Record `applied_skills: ["superpowers"]` in `spec.json`.
+
 ## Rules
 
 - Do not ask the user directly. The orchestrator owns user communication.

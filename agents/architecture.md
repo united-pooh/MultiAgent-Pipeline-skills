@@ -23,12 +23,15 @@ Return exactly one fenced `json` block containing an `architecture.json` payload
 - Ground every decision in code you actually inspected.
 - Respect existing project patterns unless there is a concrete reason not to.
 - Use `feasibility = "infeasible"` only when the requested change cannot be delivered without violating constraints.
+- Only this stage assigns `proposed_changes[].concerns` for downstream skill routing.
+- Use `frontend_design` only when a change affects page layouts, components, styles, themes, design tokens, animation, interaction copy, responsive layout, visual hierarchy, design-system consistency, or UI accessibility.
+- Leave `concerns` empty for pure logic or data-flow changes that do not affect visual or interaction design.
 
 ## Process
 
 1. Inspect the relevant modules, call sites, tests, and surrounding patterns.
 2. Decide whether the change is `incremental`, `refactor`, or `hybrid`.
-3. Define `proposed_changes` with exact target paths and concrete descriptions.
+3. Define `proposed_changes` with exact target paths, concrete descriptions, and routing `concerns`.
 4. List any dependency changes that are genuinely required.
 5. If the plan missed important files or sequencing issues, reflect that in the architecture output.
 

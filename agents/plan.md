@@ -15,6 +15,13 @@ Convert `spec.json` into an execution-ready `plan.json`.
 
 Return exactly one fenced `json` block containing a `plan.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
 
+## Planning Skill Requirement
+
+- The orchestrator must explicitly attach the `superpowers` skill name and current-environment path in your prompt.
+- Use only the skill's brainstorming and planning discipline.
+- Do not execute `superpowers` build, TDD, commit, branch-finishing, or code-writing behaviors in this stage.
+- Record `applied_skills: ["superpowers"]` in `plan.json`.
+
 ## Process
 
 1. Read every requirement, acceptance criterion, constraint, and assumption in `spec.json`.

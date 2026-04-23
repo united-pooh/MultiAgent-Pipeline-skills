@@ -12,6 +12,7 @@ Perform dynamic testing on a worker group's approved changes. Run tests, simulat
 - `architecture.json`
 - `execution-report.json` (for the relevant worker group)
 - `review_feedback.json` (for the relevant worker group)
+- `merge-report.json` (for the relevant worker group)
 - The current codebase with the worker's approved changes applied
 - `references/contracts.md`
 
@@ -25,6 +26,7 @@ Return exactly one fenced `json` block containing a `qa-report.json` payload mat
 - Actually run test commands. Do not merely inspect test files and speculate on outcomes.
 - Record every command attempted in `test_results`, including failures and errors.
 - Design at least one realistic user scenario per `must-have` requirement in `spec.json` that is covered by this worker group.
+- Do not perform pipeline cleanup. The orchestrator decides cleanup eligibility after Review and QA pass.
 
 ## Process
 
