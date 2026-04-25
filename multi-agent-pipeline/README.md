@@ -86,7 +86,7 @@ flowchart LR
 | 阶段化交付 | 把复杂实现拆成 Spec、Plan、Architecture、Execution、Review、Doc 六个阶段 |
 | 结构化产物 | 每个阶段输出 JSON，便于检查、复用和追踪 |
 | 主从分工 | 主智能体只做调度，具体实现和评审交给子智能体 |
-| 独立评审 | 支持 PRE 单评审和 EME 三评审多数投票 |
+| 独立评审 | 支持 PRE 严格单点评审和 EME 三评审多数投票 |
 | 自动返工路由 | 评审失败后可回到 Execution、Architecture 或 Plan |
 | 工作区沉淀 | 所有 canonical artifact 保存到 `.pipeline-workspace/` |
 | 文档闭环 | 评审通过后进入 Doc 阶段，更新必要文档和 CHANGELOG |
@@ -220,7 +220,7 @@ Review 阶段按 PRE 标准检查 8 个维度：
 7. Test Coverage
 8. Backward Compatibility
 
-默认 EME 模式会启动 3 个独立 reviewer。任何失败都会被聚合进 `review_feedback.json`，并决定下一步回到 Execution、Architecture 或 Plan。
+PRE 模式是最严格的生产环境单点审核：一个 reviewer 逐项确认完整核验清单，任一维度失败都会进入 `review_feedback.json`，并按失败原因打回 Execution、Architecture 或 Plan 返工。EME 模式会启动 3 个独立 reviewer，并按维度多数投票聚合。
 
 ### 6. Doc：通过评审后补齐文档
 
@@ -252,13 +252,13 @@ Doc worker 在评审通过后运行，负责更新真正需要变化的文档。
 
 ## 评审机制
 
-### PRE：单点评审
+### PRE：严格单点评审
 
-PRE 使用一个 reviewer，适合小范围改动或需要节省时间和成本的情况。
+PRE 使用一个 reviewer，但它不是轻量模式，而是最严格、最适合生产环境的单点审核模式。Reviewer 必须逐项确认 8 个 PRE 维度；只要任一维度 `fail`，本轮评审就不通过，并根据 `recommended_next_stage` 和 `rework_reason` 打回 Execution、Architecture 或 Plan 返工。
 
 ### EME：三点评审
 
-EME 使用三个 reviewer 独立评审，然后按维度投票聚合。默认使用 EME，因为它更适合生产级变更。
+EME 使用三个 reviewer 独立评审，然后按维度投票聚合，适合需要多视角交叉验证的场景。
 
 | 评分 | 含义 |
 |---|---|

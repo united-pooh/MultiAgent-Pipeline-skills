@@ -1,6 +1,6 @@
 # PRE (Pointwise Rubric Evaluation) Rubric
 
-Each of the 3 EME reviewers evaluates these 8 dimensions independently. Every dimension gets exactly one score: `pass`, `fail`, or `warning`.
+PRE is the strictest production review gate: one reviewer evaluates the full 8-dimension checklist, and any failed dimension blocks acceptance and sends the work back for rework. In EME mode, each of the 3 reviewers evaluates the same 8 dimensions independently. Every dimension gets exactly one score: `pass`, `fail`, or `warning`.
 
 ## Scoring Definitions
 
