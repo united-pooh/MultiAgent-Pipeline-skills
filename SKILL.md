@@ -21,7 +21,7 @@ This skill is written for Codex, not as a generic "agent framework".
 
 - Use `spawn_agent` for each stage. Default to `fork_context: true`.
 - Keep orchestration local. Subagents produce artifacts or bounded code/doc changes; the orchestrator decides what to run next.
-- Default review mode is `EME`. Do not ask the user to choose unless speed or token budget is an explicit concern. Use `PRE` only for clearly small changes or when the user asks for a cheaper/faster pass.
+- Default review mode is `EME`. Do not ask the user to choose unless the user explicitly requests a mode. Use `PRE` when the user needs the strictest production gate: a single reviewer applies the full PRE checklist, and any failed dimension sends the work back for rework.
 - Ask the user only for blocking ambiguities. Otherwise proceed with explicit assumptions in `spec.json`.
 - Use `wait_agent` only when the next pipeline step is blocked on that result.
 - Never rely on the default `wait_agent` timeout for this skill. Always pass an explicit long `timeout_ms`.
@@ -182,7 +182,8 @@ Run review after every execution pass.
 
 `PRE` mode:
 - Spawn 1 Review subagent.
-- Convert its single review directly into `review_feedback.json`.
+- Treat PRE as the strictest production gate: the reviewer must evaluate the full 8-dimension checklist, and any failed dimension blocks acceptance.
+- Convert its single review directly into `review_feedback.json`; if any dimension fails, route the work back for rework using `recommended_next_stage` and `rework_reason`.
 
 Voting rules:
 - `warning` counts as `pass` for majority voting.

@@ -251,7 +251,7 @@ Consumed by: **Execution Agent**, **Doc Agent**
 
 ### Field Rules
 
-- `mode`: `EME` for 3-reviewer majority vote, `PRE` for a single reviewer.
+- `mode`: `EME` for 3-reviewer majority vote, `PRE` for the strict single-reviewer production gate.
 - `recommended_next_stage`: `null` when `verdict = "pass"`. When `verdict = "fail"`, use `execution`, `architecture`, or `plan` based on the dominant root cause after review aggregation.
 - `rework_reason`: Required when `verdict = "fail"`. Must be `null` when `verdict = "pass"`.
 - `eme_votes`: Exactly 8 entries in `EME`; in `PRE`, still emit 8 entries with a single repeated vote so downstream stages keep one shape.
