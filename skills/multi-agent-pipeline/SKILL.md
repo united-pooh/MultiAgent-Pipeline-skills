@@ -138,6 +138,12 @@ Stop condition:
 
 ### 4. Execution
 
+**Git snapshot:** Before spawning each Execution subagent, create a rollback point:
+```bash
+git add -A && git commit -m "pipeline: pre-execution snapshot (iteration N)" --allow-empty
+```
+Use the actual iteration number. This commit is the recovery point if execution corrupts the workspace.
+
 Spawn an Execution subagent with `spec.json`, `plan.json`, `architecture.json`, and the latest `review_feedback.json` when retrying.
 
 Worker ownership:
@@ -244,6 +250,11 @@ Goal:
 - Return `doc-report.json`
 
 Before final delivery, the orchestrator only verifies that `doc-report.json` is valid and the expected documentation files are present in the workspace. If docs did not land, spawn a new Doc `Agent` call. The orchestrator does not hand-author the documentation.
+
+**Git snapshot:** After Doc completes successfully, create a final delivery commit:
+```bash
+git add -A && git commit -m "pipeline: post-review delivery snapshot (iteration N)"
+```
 
 ## Orchestration Rules
 
