@@ -243,6 +243,8 @@ Consumed by: **Execution Agent**, **Doc Agent**
   ],
   "summary": "string — overall assessment in 2-3 sentences",
   "blocking_issues_count": 0,
+  "warning_count": 0,
+  "warning_threshold_triggered": false,
   "warnings": [
     "string — preserved non-blocking concerns"
   ]
@@ -251,7 +253,7 @@ Consumed by: **Execution Agent**, **Doc Agent**
 
 ### Field Rules
 
-- `mode`: `EME` for 3-reviewer majority vote, `PRE` for a single reviewer.
+- `mode`: `EME` for 3-reviewer majority vote, `PRE` for the strict single-reviewer production gate.
 - `recommended_next_stage`: `null` when `verdict = "pass"`. When `verdict = "fail"`, use `execution`, `architecture`, or `plan` based on the dominant root cause after review aggregation.
 - `rework_reason`: Required when `verdict = "fail"`. Must be `null` when `verdict = "pass"`.
 - `eme_votes`: Exactly 8 entries in `EME`; in `PRE`, still emit 8 entries with a single repeated vote so downstream stages keep one shape.
@@ -260,7 +262,46 @@ Consumed by: **Execution Agent**, **Doc Agent**
 - `merged_issues`: Empty array when `verdict` is `pass`.
 - `verdict`: `pass` only when all 8 dimensions pass after aggregation.
 - `blocking_issues_count`: Count of dimensions with `final_score = "fail"`.
+- `warning_count`: Total number of dimensions with `final_score = "warning"` across the aggregated review.
+- `warning_threshold_triggered`: Set to `true` when `warning_count >= 2` and the verdict was forced to `fail` as a result. Must be `false` when `warning_count < 2` or when independent `fail` scores already determined the verdict.
 - `warnings`: Preserve non-blocking review concerns even on pass.
+
+---
+
+## validation-report.json
+
+Produced by: **Validation Agent**  
+Consumed by: **Orchestrator**, **Review Agent**
+
+```json
+{
+  "version": "1.0",
+  "status": "passed | failed | error",
+  "commands_run": [
+    {
+      "command": "string — exact command run",
+      "exit_code": 0,
+      "output": "string — full stdout/stderr"
+    }
+  ],
+  "test_summary": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0
+  },
+  "blocking_failures": [
+    "string — failing test name or vet error, one per entry"
+  ]
+}
+```
+
+### Field Rules
+
+- `status`: `passed` when all commands exit 0; `failed` when any command exits non-zero; `error` when a command could not be run at all (e.g., compile error preventing test execution).
+- `commands_run`: Include every command attempted, in order. Never omit a command that was run.
+- `test_summary`: Aggregate counts across all test commands. Set to zeroes if no test commands were run.
+- `blocking_failures`: Empty array when `status` is `passed`. List individual failing test names or vet diagnostics when `status` is `failed`.
 
 ---
 
@@ -286,4 +327,3 @@ Consumed by: **Orchestrator**
 - `updated_files`: Empty array only when `status` is `no_changes_needed`.
 - `summary`: Required even when no docs changed.
 - `notes`: Use for deferred docs work or style constraints discovered during editing.
-

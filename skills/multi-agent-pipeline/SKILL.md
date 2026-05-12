@@ -1,8 +1,8 @@
 ---
 name: multi-agent-pipeline
 description: >
-  Codex-first multi-agent production pipeline for non-trivial implementation work. Uses
-  `spawn_agent` to run Spec, Plan, Architecture, Execution, Review, and Doc subagents,
+  Claude Code multi-agent production pipeline for non-trivial implementation work. Uses
+  the Agent tool to run Spec, Plan, Architecture, Execution, Review, and Doc subagents,
   persists artifacts in `.pipeline-workspace/`, and loops Execution and Review until the
   change passes. Use when the user wants a feature, refactor, or subsystem built with
   explicit spec/plan/architecture/review stages, or mentions "pipeline", "multi-agent",
@@ -13,22 +13,18 @@ description: >
 
 Use this skill when the task is large enough to benefit from explicit staging instead of ad hoc implementation.
 
-The local Codex agent is the orchestrator. It owns user communication, artifact persistence, stage routing, review aggregation, and thread/timeout management. Subagents own bounded stage work.
+The main Claude Code session is the orchestrator. It owns user communication, artifact persistence, stage routing, review aggregation, and context management. Subagents own bounded stage work.
 
-## Codex Execution Model
+## Claude Code Execution Model
 
-This skill is written for Codex, not as a generic "agent framework".
+This skill is written for Claude Code, using the `Agent` tool.
 
-- Use `spawn_agent` for each stage. Default to `fork_context: true`.
+- Use the `Agent` tool for each stage. Each Agent call is synchronous — it blocks until the subagent returns.
 - Keep orchestration local. Subagents produce artifacts or bounded code/doc changes; the orchestrator decides what to run next.
-- Default review mode is `EME`. Do not ask the user to choose unless speed or token budget is an explicit concern. Use `PRE` only for clearly small changes or when the user asks for a cheaper/faster pass.
+- Default review mode is `EME`. Do not ask the user to choose unless the user explicitly requests a mode. Use `PRE` when the user needs the strictest production gate: a single reviewer applies the full PRE checklist, and any failed dimension sends the work back for rework.
 - Ask the user only for blocking ambiguities. Otherwise proceed with explicit assumptions in `spec.json`.
-- Use `wait_agent` only when the next pipeline step is blocked on that result.
-- Never rely on the default `wait_agent` timeout for this skill. Always pass an explicit long `timeout_ms`.
-- Default waiting policy for this skill: use `timeout_ms: 600000` (10 minutes) for any stage that is blocking the next step.
-- If `wait_agent` returns without a final result because the timeout elapsed, treat that as "still running", not as failure. Keep the agent open and call `wait_agent` again with another long timeout until a final status arrives or a real blocker is identified.
-- Close completed agents after their outputs are integrated.
-- Be conscious of agent thread limits. Before any fan-out stage such as `EME` review, close finished stage agents so reviewer spawning does not fail on thread exhaustion.
+- For EME parallel review, send all 3 `Agent` calls in a single response message — Claude Code runs them concurrently when in the same message.
+- If a subagent returns malformed JSON, rerun that stage with a corrected prompt. Do not hand-wave the artifact.
 
 ## Main Agent Role
 
@@ -38,8 +34,8 @@ The orchestrator is orchestration-only. Keep the main context lean.
 - The orchestrator is responsible for:
   - reading skill instructions, contracts, and rubric files
   - creating and maintaining `.pipeline-workspace/`
-  - parsing and persisting canonical artifacts
-  - spawning, waiting on, and closing stage agents
+  - parsing and persisting canonical artifacts (using `Write` and `Read` tools directly)
+  - spawning stage subagents via the `Agent` tool
   - deciding the next stage based on artifact outputs
   - aggregating review results and routing retries or upward rework
   - bringing genuinely blocking ambiguities back to the user
@@ -48,48 +44,37 @@ The orchestrator is orchestration-only. Keep the main context lean.
   - rerunning a stage when a subagent returned malformed JSON
   - asking the same or a new stage worker to sync intended changes into the main workspace when the expected changes did not land
 
-## Recommended Agent Types
+## Recommended Agent Types (subagent_type)
 
-- Spec: `default`
-- Plan: `default`
-- Architecture: `default`
-- Execution: `worker`
-- Review: `default`
-- Doc: `worker`
+- Spec: `general-purpose`
+- Plan: `general-purpose`
+- Architecture: `Explore`
+- Execution: `general-purpose`
+- Review: `general-purpose`
+- Doc: `general-purpose`
 
-Use `explorer` only for narrow side questions during architecture or review, not for the main pipeline stages.
+## Recommended Models
 
-## Recommended Model Overrides
+Use explicit `model` overrides in the `Agent` tool call when spawning stage subagents unless the user asks for a cheaper or faster run.
 
-Use explicit `model` and `reasoning_effort` overrides when spawning stage agents unless the user asks for a cheaper or faster run.
+- Spec: `opus`
+- Plan: `opus`
+- Architecture: `opus`
+- Execution: `opus`
+- Review PRE: `opus`
+- Review EME: spawn 3 reviewers — `opus`, `opus`, `sonnet`
+- Doc: `sonnet`
 
-- Spec: `gpt-5.4`, `reasoning_effort: xhigh`
-- Plan: `gpt-5.4`, `reasoning_effort: xhigh`
-- Architecture: `gpt-5.4`, `reasoning_effort: xhigh`
-- Execution: `gpt-5.4`, `reasoning_effort: high`
-- Review `PRE`: `gpt-5.4`, `reasoning_effort: xhigh`
-- Review `EME`: spawn 3 reviewers total using `gpt-5.4`, `gpt-5.4`, and `gpt-5.4-mini`
-- Doc: `gpt-5.4`, `reasoning_effort: medium`
+If a stage omits `model`, it inherits the orchestrator's current model.
 
-If a stage omits `model`, it inherits the orchestrator's current model. `wait_agent` has no model setting because it only waits on an existing agent.
+## Parallelism
 
-Recommended `wait_agent` timeouts for this skill:
-- Spec / Plan / Architecture: `timeout_ms: 600000`
-- Execution: `timeout_ms: 600000`
-- Review `PRE`: `timeout_ms: 600000`
-- Review `EME`: `timeout_ms: 600000` per reviewer wait call
-- Doc: `timeout_ms: 600000`
+Claude Code's `Agent` tool is synchronous per call, but **multiple `Agent` calls in the same response message run concurrently**. Use this for:
 
-Example blocking wait pattern:
+- EME Review: send all 3 reviewer `Agent` calls in one message
+- Any fan-out where stages do not depend on each other's outputs
 
-```json
-{
-  "targets": ["<agent_id>"],
-  "timeout_ms": 600000
-}
-```
-
-If the wait returns timed out or empty, immediately wait again with the same long timeout instead of assuming the subagent reply was lost.
+For sequential stages (Spec → Plan → Architecture → Execution), call one `Agent` at a time and wait for the result before proceeding.
 
 ## Workspace
 
@@ -101,6 +86,7 @@ Create a run workspace before the first stage:
 ├── plan.json
 ├── architecture.json
 ├── execution-report.json
+├── validation-report.json
 ├── review_feedback.json
 ├── doc-report.json
 ├── review_history/
@@ -112,7 +98,7 @@ Create a run workspace before the first stage:
     └── pipeline.log
 ```
 
-The orchestrator writes these files locally after each stage. Do not rely on subagents to persist canonical artifacts in the main workspace.
+The orchestrator writes these files locally after each stage using the `Write` tool. Do not rely on subagents to persist canonical artifacts in the main workspace.
 
 ## Pipeline
 
@@ -143,7 +129,7 @@ Goal:
 Spawn the Architecture subagent with `spec.json` and `plan.json`.
 
 Goal:
-- Read the actual codebase
+- Read the actual codebase (subagent has full tool access including `Glob`, `Grep`, `Read`)
 - Decide `incremental`, `refactor`, or `hybrid`
 - Produce `architecture.json`
 
@@ -152,49 +138,63 @@ Stop condition:
 
 ### 4. Execution
 
-Spawn an Execution `worker` with `spec.json`, `plan.json`, `architecture.json`, and the latest `review_feedback.json` when retrying.
+Spawn an Execution subagent with `spec.json`, `plan.json`, `architecture.json`, and the latest `review_feedback.json` when retrying.
 
 Worker ownership:
 - The worker owns only files named in `architecture.json.proposed_changes` plus directly related tests and docs it must touch.
 - The worker is not alone in the codebase and must not revert unrelated edits.
-- The worker implements in its forked workspace and returns an `execution-report.json` payload summarizing changed files, requirement coverage, tests, and blockers.
-- The worker is the implementation owner. If browser automation is required for validation, include the installed Playwright skill path in the spawn prompt and tell the worker to use it before inventing a browser workflow.
+- The worker implements directly in the main workspace (Claude Code subagents share the filesystem) and returns an `execution-report.json` payload summarizing changed files, requirement coverage, tests, and blockers.
+- The worker is the implementation owner. If browser automation is required for validation, include the Playwright skill path in the prompt and tell the worker to use it before inventing a browser workflow.
 
-Before starting review, the orchestrator only performs lightweight integration checks. The main workspace, not the worker fork, is what reviewers evaluate.
+Before starting review, the orchestrator performs lightweight integration checks.
 
 Integration rule:
-- First inspect whether the worker's changes are already present in the main workspace.
-- If they are already present and match the intended implementation, record that and proceed.
-- If they are not present, do not manually integrate or reproduce them in the main workspace. Send a follow-up task to the same Execution worker asking it to sync the intended implementation into the main workspace.
-- If the original Execution worker is unavailable, spawn a new Execution worker whose only job is to land the intended implementation into the main workspace using the existing `execution-report.json` and any prior worker context.
-- Before review, the orchestrator should only check that `execution-report.json` is valid, `changed_files` exist in the main workspace, and `tests_run` is populated. Functional correctness is the Review worker's job.
+- Verify that `execution-report.json` is valid, `changed_files` exist in the workspace, and `tests_run` is populated.
+- If expected files are missing, send a follow-up `Agent` call to the same execution prompt asking it to sync the intended implementation.
+- Functional correctness is the Review subagent's job.
+
+### 4a. Validation
+
+After every successful Execution pass, before starting Review, spawn a Validation subagent using `agents/validation.md`.
+
+Goal:
+- Run `go test ./...` and `go vet ./...` against the current workspace
+- Collect raw command output, exit codes, and test counts
+- Produce `validation-report.json` — objective evidence for the Review stage
+
+Integration rule:
+- If `validation-report.json.status == "failed"` or `"error"`, route directly back to Execution. Do not start Review. Pass `validation-report.json` to the next Execution pass as additional context alongside `review_feedback.json`.
+- If `validation-report.json.status == "passed"`, continue to Review. Pass `validation-report.json` inline in the Review prompt.
+
+The orchestrator writes `validation-report.json` to `.pipeline-workspace/` after each Validation pass.
 
 ### 5. Review
 
-Run review after every execution pass.
+Run review after every execution pass where Validation passed.
 
 `EME` mode:
-- Spawn 3 independent Review subagents in parallel.
+- Send 3 independent Review `Agent` calls **in a single message** (they run in parallel).
 - Give each reviewer the same inputs and a distinct `reviewer_id`.
 - Each reviewer returns one `review_individual_N.json`.
 - The orchestrator writes all reviewer outputs to `review_history/` and merges them into `review_feedback.json`.
-- If browser automation is required for review evidence, include the installed Playwright skill path in the spawn prompt and tell reviewers to use it in a read-only validation mode.
 
 `PRE` mode:
 - Spawn 1 Review subagent.
-- Convert its single review directly into `review_feedback.json`.
+- Treat PRE as the strictest production gate: the reviewer evaluates the full 8-dimension checklist, and any failed dimension blocks acceptance.
+- Convert its single review directly into `review_feedback.json`; if any dimension fails, route the work back for rework.
 
 Voting rules:
 - `warning` counts as `pass` for majority voting.
 - Any failed dimension keeps the pipeline in the retry loop, but the next stage is chosen from `review_feedback.json.recommended_next_stage`.
 - Preserve warnings even when the final verdict is `pass`.
+- **Warning threshold rule**: After aggregating votes, count total warning dimensions (`warning_count`). If `warning_count >= 2`, force `verdict = "fail"` and set `warning_threshold_triggered = true`, even if no individual dimension scored `fail`. Set `recommended_next_stage = "execution"` when only the warning threshold triggered the failure.
 
 Loop rule:
-- `Execution -> Review -> fail` normally loops back to `Execution` only when `review_feedback.json.recommended_next_stage == "execution"`.
+- `Execution → Review → fail` normally loops back to `Execution` only when `review_feedback.json.recommended_next_stage == "execution"`.
 - If `Execution` returns `status = "blocked"` with `recommended_next_stage = "architecture"` or `"plan"`, do not send the change to Review. Route upward immediately.
 - If `Review` returns `verdict = "fail"` with `recommended_next_stage = "architecture"` or `"plan"`, route upward immediately.
-- Track `consecutive_exec_review_failures` only for the normal `Execution -> Review(fail, execution)` loop.
-- After 2 consecutive `Execution -> Review(fail, execution)` cycles, force an `Architecture` rework even if the latest review still points to `execution`.
+- Track `consecutive_exec_review_failures` only for the normal `Execution → Review(fail, execution)` loop.
+- After 2 consecutive `Execution → Review(fail, execution)` cycles, force an `Architecture` rework even if the latest review still points to `execution`.
 - Reset `consecutive_exec_review_failures` whenever review passes or the pipeline routes to `Architecture` or `Plan`.
 
 ### 5a. Architecture Rework
@@ -202,7 +202,7 @@ Loop rule:
 Run an Architecture rework pass when:
 - `Execution` reports `status = "blocked"` and recommends `architecture`
 - `Review` fails and recommends `architecture`
-- the pipeline hit 2 consecutive `Execution -> Review(fail, execution)` cycles
+- the pipeline hit 2 consecutive `Execution → Review(fail, execution)` cycles
 - `Review` or `Execution` recommends `plan`, because Plan rework must flow through Architecture again before execution resumes
 
 Inputs:
@@ -236,32 +236,32 @@ Routing rule:
 
 ### 6. Documentation
 
-After review passes, spawn a Doc `worker` with `spec.json`, `architecture.json`, and `execution-report.json`.
+After review passes, spawn a Doc subagent with `spec.json`, `architecture.json`, and `execution-report.json`.
 
 Goal:
 - Update only the docs that actually changed
 - Always update `CHANGELOG.md`
 - Return `doc-report.json`
 
-Before final delivery, the orchestrator only verifies that `doc-report.json` is valid and the expected documentation files are present in the main workspace. If docs did not land, send a follow-up task to the same Doc worker or a new Doc worker. The orchestrator does not hand-author the documentation.
+Before final delivery, the orchestrator only verifies that `doc-report.json` is valid and the expected documentation files are present in the workspace. If docs did not land, spawn a new Doc `Agent` call. The orchestrator does not hand-author the documentation.
 
 ## Orchestration Rules
 
 ### Prompt Construction
 
 For each spawned stage:
-- Read the stage instructions from `agents/<stage>.md`
-- Use `references/orchestrator-prompts.md` as the default scaffold for the plain-text `spawn_agent` message instead of improvising a new prompt each time
+- Read the stage instructions from `agents/<stage>.md` using the `Read` tool
+- Use `references/orchestrator-prompts.md` as the default scaffold for the Agent prompt
 - Read only the specific contract or rubric files that stage needs
-- Pass artifact contents or file paths explicitly
+- Pass artifact contents inline in the prompt (paste JSON directly) — subagents cannot reliably reference workspace paths unless told explicitly
 - Tell the subagent to return exactly one fenced `json` block and no extra prose
-- For `Execution` and `Review`, include the installed Playwright skill path in the prompt whenever real browser validation may be required.
+- For `Execution` and `Review`, include the Playwright skill path in the prompt whenever real browser validation may be required
 
 ### Artifact Discipline
 
 - The orchestrator is the source of truth for artifact files in `.pipeline-workspace/`.
-- Parse subagent JSON, validate the required fields, then write the canonical artifact locally.
-- If a subagent response is malformed, fix the prompt and rerun that stage instead of hand-waving the artifact.
+- Parse subagent JSON from the Agent tool result, validate required fields, then write the canonical artifact locally using the `Write` tool.
+- If a subagent response is malformed, fix the prompt and rerun that stage.
 - Write artifacts even when the corresponding stage also changed files. Artifact persistence and code/doc integration are separate responsibilities.
 - The orchestrator should not manually repair artifact contents except by rerunning the responsible stage.
 
@@ -276,11 +276,6 @@ The orchestrator merges reviewer outputs locally:
 - Aggregate `recommended_next_stage` from reviewer outputs. Use the dominant blocking recommendation across failing reviewers. If there is no clear upstream signal, default failed review routing to `execution`.
 - Aggregate `rework_reason` into a concise top-level root-cause summary in `review_feedback.json`.
 
-Operational note:
-- In real Codex sessions, `EME` review is the most likely point to hit thread limits because it spawns 3 reviewers at once.
-- Close Spec, Plan, Architecture, and any completed Execution agents before spawning the reviewer trio.
-- If a reviewer spawn still fails because of temporary thread pressure, close any finished idle agents first, then retry the missing reviewer instead of downgrading silently to fewer reviewers.
-
 ### Rework Routing
 
 - `Execution` owns implementation. `Review` owns correctness judgment. `Architecture` and `Plan` own top-level redesign.
@@ -291,12 +286,11 @@ Operational note:
 
 ### File Ownership
 
-When spawning `worker` agents:
+When spawning execution subagents:
 - Assign exact file ownership from `architecture.json.proposed_changes`
-- Tell the worker it may also touch directly adjacent tests or docs needed to complete the task
-- Tell the worker not to revert edits it did not make
-- Treat uploaded worker changes as proposals until they are confirmed in the main workspace.
-- If the proposals are missing from the main workspace, send the responsible worker back to sync them instead of taking over the work in the orchestrator.
+- Tell the subagent it may also touch directly adjacent tests or docs needed to complete the task
+- Tell the subagent not to revert edits it did not make
+- After the Agent call returns, verify the expected files are present. If missing, resend with a sync-pass prompt.
 
 ### When Not to Use This Skill
 
@@ -307,8 +301,7 @@ Skip this pipeline for:
 
 ## Files To Read
 
-- Stage prompts: `agents/spec.md`, `agents/plan.md`, `agents/architecture.md`, `agents/execution.md`, `agents/review.md`, `agents/doc.md`
+- Stage prompts: `agents/spec.md`, `agents/plan.md`, `agents/architecture.md`, `agents/execution.md`, `agents/validation.md`, `agents/review.md`, `agents/doc.md`
 - Contracts: `references/contracts.md`
 - Review rubric: `references/pre-rubric.md`
 - Prompt scaffolds: `references/orchestrator-prompts.md`
-
