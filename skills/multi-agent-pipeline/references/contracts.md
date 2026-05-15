@@ -276,10 +276,12 @@ Consumed by: **Orchestrator**, **Review Agent**
 ```json
 {
   "version": "1.0",
-  "status": "passed | failed | error",
+  "detected_language": "go | python | javascript | typescript | rust | java | ruby | unknown",
+  "status": "passed | failed | error | skipped",
   "commands_run": [
     {
       "command": "string — exact command run",
+      "type": "fix | check",
       "exit_code": 0,
       "output": "string — full stdout/stderr"
     }
@@ -302,6 +304,9 @@ Consumed by: **Orchestrator**, **Review Agent**
 - `commands_run`: Include every command attempted, in order. Never omit a command that was run.
 - `test_summary`: Aggregate counts across all test commands. Set to zeroes if no test commands were run.
 - `blocking_failures`: Empty array when `status` is `passed`. List individual failing test names or vet diagnostics when `status` is `failed`.
+- `detected_language`: The language detected from repo root marker files. Set to `unknown` when no marker file is found.
+- `status`: `passed` when all commands exit 0; `failed` when any check command exits non-zero; `error` when a fix command fails to run or compilation prevents test execution; `skipped` when `detected_language` is `unknown` — orchestrator treats `skipped` as a soft pass and proceeds to Review.
+- `commands_run[].type`: `fix` for commands that write files (formatters, import sorters); `check` for read-only commands (tests, type checkers, linters that only report).
 
 ---
 
