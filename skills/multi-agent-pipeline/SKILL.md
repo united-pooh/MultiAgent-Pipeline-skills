@@ -303,6 +303,45 @@ When spawning execution subagents:
 - Tell the subagent not to revert edits it did not make
 - After the Agent call returns, verify the expected files are present. If missing, resend with a sync-pass prompt.
 
+### Usage Examples
+
+**Invoking the skill directly in Claude Code or Codex:**
+
+```
+/multi-agent-pipeline add a rate-limiting middleware to the API
+```
+
+```
+/multi-agent-pipeline refactor the auth module to support OAuth2
+```
+
+```
+/multi-agent-pipeline build a CSV export feature for the reports page
+```
+
+You can also trigger it conversationally — the orchestrator will invoke the pipeline automatically when the request is large enough:
+
+```
+Build a notification system that sends email and Slack alerts when a job fails.
+Use the full pipeline with spec, architecture, and review stages.
+```
+
+```
+I need a production-quality implementation of paginated search. Run the multi-agent pipeline.
+```
+
+**Requesting a stricter review gate (PRE mode):**
+
+```
+/multi-agent-pipeline add database connection pooling — use PRE review mode
+```
+
+**Resuming a stalled pipeline from a specific stage:**
+
+```
+The last execution pass failed. Skip to architecture rework and retry from there.
+```
+
 ### When Not to Use This Skill
 
 Skip this pipeline for:
