@@ -1,6 +1,6 @@
 # PRE (Pointwise Rubric Evaluation) Rubric
 
-PRE is the strictest production review gate: one reviewer evaluates the full 8-dimension checklist, and any failed dimension blocks acceptance and sends the work back for rework. In EME mode, each of the 3 reviewers evaluates the same 8 dimensions independently. Every dimension gets exactly one score: `pass`, `fail`, or `warning`.
+Each of the 3 EME reviewers evaluates these 8 dimensions independently. Every dimension gets exactly one score: `pass`, `fail`, or `warning`.
 
 ## Scoring Definitions
 
@@ -22,8 +22,6 @@ Does the implementation satisfy all requirements and acceptance criteria from `s
 
 **How to evaluate**: Cross-reference each requirement ID in `spec.json` against the implementation. Trace acceptance criteria to specific code paths.
 
-**Evidence requirement**: Must reference `validation-report.json` test output to confirm tests passed. If `validation-report.json.status != "passed"` or any acceptance-criteria test is absent from `test_summary`, this dimension must be `fail`. Do not score `pass` based on code reading alone.
-
 ### 2. Security
 
 Are there vulnerabilities that could be exploited?
@@ -35,8 +33,6 @@ Are there vulnerabilities that could be exploited?
 | fail | SQL/command injection possible, XSS vectors, hardcoded credentials, missing auth on protected endpoints, sensitive data in logs. |
 
 **How to evaluate**: Check all user input paths, database queries, shell commands, HTML rendering, authentication gates, and log statements.
-
-**Evidence requirement**: Cite specific `file:line` for every finding. A `pass` must name at least one input boundary that was verified. Do not score `pass` with only "no issues found".
 
 ### 3. Performance
 
@@ -50,8 +46,6 @@ Are there obvious performance problems?
 
 **How to evaluate**: Trace data access patterns, look for loops containing I/O, check query patterns, review memory allocation in frequently called code.
 
-**Evidence requirement**: Cite `file:line` for any identified pattern. A `pass` must name at least one data path that was inspected.
-
 ### 4. Error Handling
 
 Are edge cases and failure modes handled gracefully?
@@ -63,8 +57,6 @@ Are edge cases and failure modes handled gracefully?
 | fail | Uncaught exceptions on likely error paths, silent swallowing of errors, panics on invalid input, no handling of network/IO failures. |
 
 **How to evaluate**: Identify all external calls (DB, API, file I/O) and verify error handling. Test mental model of what happens with nil/null/empty/malformed inputs.
-
-**Evidence requirement**: Cite `file:line` for each external call inspected. A `pass` must name at least one error path that was traced.
 
 ### 5. Code Quality
 
@@ -78,8 +70,6 @@ Is the code readable, maintainable, and consistent with the project's style?
 
 **How to evaluate**: Read the code as if maintaining it 6 months from now. Compare style with adjacent files in the project.
 
-**Evidence requirement**: Cite `file:line` for any naming, abstraction, or style issue found. A `pass` must reference at least one file compared for style consistency.
-
 ### 6. Architecture Compliance
 
 Does the implementation follow the design in `architecture.json`?
@@ -91,8 +81,6 @@ Does the implementation follow the design in `architecture.json`?
 | fail | Files modified that weren't in the plan without justification, wrong design pattern used, architectural boundaries violated, unauthorized dependencies added. |
 
 **How to evaluate**: Compare each entry in `architecture.json.proposed_changes` against actual changes. Verify `dependency_changes` match.
-
-**Evidence requirement**: For each `proposed_changes` entry, confirm the file was modified and cite the actual change. Any entry not accounted for must be mentioned in evidence.
 
 ### 7. Test Coverage
 
@@ -106,8 +94,6 @@ Are critical code paths tested?
 
 **How to evaluate**: Map test cases to requirements. Verify tests would actually catch regressions (not just smoke tests).
 
-**Evidence requirement**: Must reference `validation-report.json` `test_summary` counts. If `test_summary.failed > 0`, this dimension must be `fail`. A `pass` must name specific test functions verified to cover critical paths.
-
 ### 8. Backward Compatibility
 
 Does the change preserve existing APIs, interfaces, and behavior?
@@ -119,8 +105,6 @@ Does the change preserve existing APIs, interfaces, and behavior?
 | fail | Public API signature changed without migration path, existing behavior altered without documentation, breaking change to downstream consumers. |
 
 **How to evaluate**: Check if `constraints` in `spec.json` mention compatibility requirements. Diff public interfaces before/after. Search for callers of modified functions.
-
-**Evidence requirement**: Cite any public interface that was checked. A `pass` must name at least one public function or API endpoint verified to be unchanged or extended additively.
 
 ## Evidence Requirements
 
