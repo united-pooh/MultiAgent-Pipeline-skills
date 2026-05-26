@@ -2,11 +2,11 @@
 name: multi-agent-pipeline
 description: >
   Claude Code multi-agent production pipeline for non-trivial implementation work. Uses
-  the Agent tool to run Spec, Plan, Architecture, Execution, Review, and Doc subagents,
-  persists artifacts in `.pipeline-workspace/`, and loops Execution and Review until the
-  change passes. Use when the user wants a feature, refactor, or subsystem built with
-  explicit spec/plan/architecture/review stages, or mentions "pipeline", "multi-agent",
-  "production workflow", or "full implementation".
+  the Agent tool to run Brainstorming, Spec, Plan, Architecture, Execution, Review, and
+  Doc stages, persists artifacts in `.pipeline-workspace/`, and loops Execution and Review
+  until the change passes. Use when the user wants a feature, refactor, or subsystem built
+  with explicit brainstorming/spec/plan/architecture/review stages, or mentions "pipeline",
+  "multi-agent", "production workflow", or "full implementation".
 ---
 
 # Multi-Agent Production Pipeline
@@ -82,6 +82,8 @@ Create a run workspace before the first stage:
 
 ```text
 .pipeline-workspace/
+├── design.md
+├── spec.md
 ├── spec.json
 ├── plan.json
 ├── architecture.json
@@ -102,18 +104,55 @@ The orchestrator writes these files locally after each stage using the `Write` t
 
 ## Pipeline
 
-### 1. Spec
+### 0. Brainstorming
 
-Spawn the Spec subagent using `agents/spec.md` and `references/contracts.md`.
+Brainstorming is led directly by the orchestrator in dialogue with the user. Do not spawn a subagent for this stage.
 
 Goal:
-- Turn the request into `spec.json`
-- Record explicit assumptions instead of stopping on every ambiguity
-- Keep scope tight and acceptance criteria testable
+- Explore project context (read relevant files, git log)
+- Ask the user questions one at a time (prefer multiple-choice options to reduce typing burden), focusing on purpose, constraints, and success criteria
+- Propose 2-3 approaches with trade-off analysis and a recommendation
+- Present the design section by section, asking for confirmation after each
+- Once the user approves the design, write it to `.pipeline-workspace/design.md`
 
-User interruption rule:
-- If the subagent identifies a truly blocking ambiguity that changes the core feature or acceptance criteria, the orchestrator asks the user before continuing.
-- Otherwise, the orchestrator writes `spec.json` and proceeds.
+`design.md` format — use the following section skeleton:
+
+```markdown
+## Objective
+[One paragraph describing what is being built and why]
+
+## Chosen Approach
+[The approach agreed on, with brief rationale]
+
+## Constraints
+[Technical or business constraints identified during dialogue]
+
+## Success Criteria
+[What "done" looks like — testable, concrete]
+```
+
+The language of `design.md` should match the conversation language. Do not write `design.md` to the codebase `docs/` directory — it is a pipeline-internal artifact.
+
+User approval rule:
+- Explicitly ask the user whether they approve the design before proceeding (use a confirmation question in the conversation language)
+- Do not start the Spec stage until the user approves
+- If the user requests changes, continue the dialogue and update `design.md`
+
+### 1. Spec
+
+Spawn the Spec subagent using `agents/spec.md` and `references/contracts.md`. Pass the contents of `.pipeline-workspace/design.md` inline in the prompt.
+
+Goal:
+- Read `design.md` and turn it into two outputs: `spec.md` (human-readable, Chinese) and `spec.json` (structured, for downstream stages)
+- `spec.json`: record explicit assumptions instead of stopping on every ambiguity, keep scope tight and acceptance criteria testable
+- `spec.md`: always Chinese (regardless of conversation language), one section per requirement with design rationale, follows the format in `references/contracts.md`
+
+User approval gate:
+- After the Spec subagent returns, orchestrator writes both `spec.md` and `spec.json` to `.pipeline-workspace/`
+- Orchestrator presents `spec.md` to the user and explicitly asks for approval
+- Do not start Plan until the user approves
+- If the user requests changes, rerun the Spec subagent passing `design.md`, the prior `spec.md`, prior `spec.json`, and the user's feedback inline in the prompt
+- Rerun until the user approves
 
 ### 2. Plan
 
@@ -302,45 +341,6 @@ When spawning execution subagents:
 - Tell the subagent it may also touch directly adjacent tests or docs needed to complete the task
 - Tell the subagent not to revert edits it did not make
 - After the Agent call returns, verify the expected files are present. If missing, resend with a sync-pass prompt.
-
-### Usage Examples
-
-**Invoking the skill directly in Claude Code or Codex:**
-
-```
-/multi-agent-pipeline add a rate-limiting middleware to the API
-```
-
-```
-/multi-agent-pipeline refactor the auth module to support OAuth2
-```
-
-```
-/multi-agent-pipeline build a CSV export feature for the reports page
-```
-
-You can also trigger it conversationally — the orchestrator will invoke the pipeline automatically when the request is large enough:
-
-```
-Build a notification system that sends email and Slack alerts when a job fails.
-Use the full pipeline with spec, architecture, and review stages.
-```
-
-```
-I need a production-quality implementation of paginated search. Run the multi-agent pipeline.
-```
-
-**Requesting a stricter review gate (PRE mode):**
-
-```
-/multi-agent-pipeline add database connection pooling — use PRE review mode
-```
-
-**Resuming a stalled pipeline from a specific stage:**
-
-```
-The last execution pass failed. Skip to architecture rework and retry from there.
-```
 
 ### When Not to Use This Skill
 

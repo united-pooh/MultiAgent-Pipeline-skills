@@ -6,7 +6,7 @@ Use these templates as the default `Agent` tool prompt scaffolds. Fill the place
 
 - Always name the stage and the expected artifact.
 - Pass all artifact JSON inline — paste the content directly into the prompt.
-- Tell the subagent to return exactly one fenced `json` block and no extra prose.
+- Tell the subagent to return exactly one fenced `json` block and no extra prose (except for the Spec stage, which returns two blocks: one `json` and one `markdown`).
 - For retries or rework passes, name the triggering artifact and the current iteration.
 - For `Execution` and `Review`, include the Playwright skill path only when real browser validation may be required.
 
@@ -19,21 +19,64 @@ Follow:
 - <skill>/agents/spec.md
 - <skill>/references/contracts.md
 
-User request:
-<paste request>
+Inputs:
+- design.md (brainstorming output):
+<paste design.md content>
 
 Context:
 - Repo root: <repo_root>
 - Existing constraints: <constraints_or_none>
 
-Produce `spec.json` for iteration 1.
-Return exactly one fenced `json` block and no extra prose.
+Produce `spec.json` and `spec.md` (see agents/spec.md for format).
+Return exactly two fenced blocks and no extra prose:
+1. A `json` block with spec.json
+2. A `markdown` block with spec.md (Chinese)
 ```
 
 **Agent tool call:**
 ```json
 {
-  "description": "Spec stage — produce spec.json",
+  "description": "Spec stage — produce spec.json and spec.md",
+  "subagent_type": "general-purpose",
+  "model": "opus",
+  "prompt": "<filled template above>"
+}
+```
+
+## Spec Retry
+
+Use when the user requests changes to spec.md after reviewing it.
+
+```text
+You are the Spec stage (retry, iteration <n>) for a Claude Code multi-agent pipeline.
+
+Follow:
+- <skill>/agents/spec.md
+- <skill>/references/contracts.md
+
+Inputs:
+- design.md (brainstorming output):
+<paste design.md content>
+- prior spec.md (user-reviewed, needs changes):
+<paste prior spec.md content>
+- prior spec.json:
+<paste prior spec.json content>
+- User feedback:
+<paste user's requested changes>
+
+Context:
+- Repo root: <repo_root>
+
+Revise `spec.json` and `spec.md` based on user feedback.
+Return exactly two fenced blocks and no extra prose:
+1. A `json` block with the updated spec.json
+2. A `markdown` block with the updated spec.md (Chinese)
+```
+
+**Agent tool call:**
+```json
+{
+  "description": "Spec retry iteration <n> — apply user feedback",
   "subagent_type": "general-purpose",
   "model": "opus",
   "prompt": "<filled template above>"
