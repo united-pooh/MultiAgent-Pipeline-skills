@@ -2,9 +2,40 @@
 
 All canonical pipeline artifacts are written by the orchestrator into `.pipeline-workspace/`. Subagents return JSON matching these contracts; the orchestrator validates and persists them.
 
+## design.md
+
+Produced by: **Orchestrator** (Brainstorming stage)
+Consumed by: **Spec Agent**
+
+Free-form Markdown document capturing the agreed design from the brainstorming dialogue. The language matches the conversation language. Written to `.pipeline-workspace/design.md` by the orchestrator after the user approves the design.
+
+### Format
+
+```markdown
+## Objective
+[One paragraph describing what is being built and why]
+
+## Chosen Approach
+[The approach agreed on, with brief rationale]
+
+## Constraints
+[Technical or business constraints identified during dialogue]
+
+## Success Criteria
+[What "done" looks like — testable, concrete]
+```
+
+### Notes
+
+- This is a pipeline-internal artifact. Do not write it to the codebase `docs/` directory.
+- The language should match the conversation language (English for English users, Chinese for Chinese users, etc.).
+- The orchestrator may add or expand sections if the brainstorming dialogue surfaces additional relevant structure.
+
+---
+
 ## spec.json
 
-Produced by: **Spec Agent**  
+Produced by: **Spec Agent** (reads `design.md` from Brainstorming stage)  
 Consumed by: **Plan Agent**, **Architecture Agent**, **Execution Agent**, **Review Agent**, **Doc Agent**
 
 ```json
@@ -44,6 +75,61 @@ Consumed by: **Plan Agent**, **Architecture Agent**, **Execution Agent**, **Revi
 - `constraints`: Include backward compatibility, performance budgets, or API contracts that must not break.
 - `out_of_scope`: Helps downstream agents avoid scope creep.
 - `assumptions`: Use for low-risk inferences that the orchestrator can surface if needed. Empty array when not needed.
+
+---
+
+## spec.md
+
+Produced by: **Spec Agent**  
+Consumed by: **User** (approval gate before Plan stage)
+
+Human-readable Chinese specification document. Presented to the user by the orchestrator for explicit approval before the Plan stage begins.
+
+### Format
+
+```markdown
+# [功能名称] 规格说明
+
+## 目标
+[一段话说明要做什么、为什么要做]
+
+## 需求
+
+### REQ-001：[标题]
+- **优先级：** 必须有 / 应该有 / 可以有
+- **描述：** [需求内容]
+- **设计理由：** [为什么需要这个需求，背景和动机]
+- **验收标准：**
+  - [具体可测试的标准1]
+  - [具体可测试的标准2]
+
+### REQ-002：[标题]
+- **优先级：** 必须有 / 应该有 / 可以有
+- **描述：** [需求内容]
+- **设计理由：** [为什么需要这个需求，背景和动机]
+- **验收标准：**
+  - [具体可测试的标准1]
+
+（按需重复，每个需求必须包含上述所有字段）
+
+## 约束
+- [约束项]：[为什么存在这个约束]
+
+## 范围外
+- [排除项]：[为什么不做]
+
+## 假设
+- [假设内容]：[依据]
+```
+
+### Field Rules
+
+- Language: Chinese throughout.
+- `优先级` values: `must-have` → `必须有`, `should-have` → `应该有`, `nice-to-have` → `可以有`.
+- `设计理由`: Required for every requirement. Explains motivation, not just what.
+- Every constraint and out-of-scope item must include a brief inline reason (after the colon).
+- REQ IDs must match exactly with corresponding entries in `spec.json`.
+- If there are no assumptions, omit the `## 假设` section entirely.
 
 ---
 
