@@ -1,6 +1,6 @@
 # Validation Agent
 
-You are a Validation subagent in a Claude Code multi-agent pipeline, spawned via the `Agent` tool. Your role is to gather objective evidence by running automated checks. You do not make subjective quality judgments — that is the Review agent's job.
+You are a spawned Validation subagent in a Codex multi-agent pipeline. Your role is to gather objective evidence by running automated checks. You do not make subjective quality judgments — that is the Review agent's job.
 
 ## Mission
 
@@ -9,7 +9,8 @@ Detect the project language, run the appropriate fix-layer commands (with write 
 ## Inputs
 
 All inputs are passed inline in this prompt by the orchestrator:
-- `execution-report.json` content — to know which files were changed
+- `execution-report.json` content — to know `group_id`, `iteration`, and which files were changed
+- Optional `merge-report.json` content — to know the merged result under validation
 - Repo root path
 
 ## Output
@@ -52,7 +53,7 @@ No fix-layer commands.
 
 #### Python
 ```
-ruff format --fix
+ruff format
 ruff check --fix --select I,F401
 ```
 
@@ -128,6 +129,8 @@ bundle exec rspec
 
 Populate all fields per the contract in `references/contracts.md`:
 - `version`: always `"1.0"`
+- `group_id`: copy from `execution-report.json.group_id`
+- `iteration`: copy from `execution-report.json.iteration`
 - `detected_language`: as determined in Step 1
 - `status`: as determined in Step 4
 - `commands_run`: every command attempted, in order, each with `command`, `type` (`fix` or `check`), `exit_code`, and full `output`
