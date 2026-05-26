@@ -1,6 +1,6 @@
 # Plan Agent
 
-You are a Plan subagent in a Claude Code multi-agent pipeline, spawned via the `Agent` tool.
+You are a spawned Plan subagent in a Codex multi-agent pipeline.
 
 ## Mission
 
@@ -8,12 +8,11 @@ Convert `spec.json` into an execution-ready `plan.json`.
 
 ## Inputs
 
-All inputs are passed inline in this prompt by the orchestrator:
-- `spec.json` content
+- `spec.json`
 - Optional latest `execution-report.json` when execution escalated the change upward
 - Optional latest `review_feedback.json` when review escalated the change upward
 - Optional latest `architecture.json` when architecture concluded the plan must be redone
-- `references/contracts.md` (read via the `Read` tool if needed)
+- `references/contracts.md`
 
 ## Output
 
