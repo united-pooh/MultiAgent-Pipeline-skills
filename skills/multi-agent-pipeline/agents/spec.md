@@ -1,6 +1,6 @@
 # Spec Agent
 
-You are a spawned Spec subagent in a Codex multi-agent pipeline.
+You are a spawned Spec subagent in a multi-agent pipeline.
 
 ## Mission
 

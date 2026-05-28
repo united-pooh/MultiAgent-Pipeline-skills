@@ -1,6 +1,6 @@
 # 多智能体流水线
 
-`multi-agent-pipeline` 是一套 Codex-first 的复杂开发任务流程。它把一件较大的工作拆成需求澄清、计划、架构、分派、实现、合并、验证、审查、QA、文档和最终评估，让每一步都有明确责任和可追踪产物。
+`multi-agent-pipeline` 是一套 Codex-compatible、OpenCode-adaptable 的复杂开发任务流程。它把一件较大的工作拆成需求澄清、计划、架构、分派、实现、复杂度检查、合并、验证、审查、QA、文档和最终评估，让每一步都有明确责任和可追踪产物。
 
 它适合新功能、跨文件重构、需要严格验证的改动，或你明确要求使用“流水线”“多智能体”“production workflow”的场景。小修小补、纯问答、单文件快速修改通常不需要走完整流水线。
 
@@ -23,6 +23,8 @@
 ```
 
 默认审查模式是 EME：三个独立 Review 子代理并行检查，然后聚合结果。
+
+在 OpenCode 里，把 skill 目录安装到 `.opencode/skills/multi-agent-pipeline/` 或 `~/.config/opencode/skills/multi-agent-pipeline/`，再用 `templates/opencode-expert-agent.md` 创建一个 `.opencode/agents/multi-agent-pipeline-expert.md` primary agent。OpenCode 会先通过 `name` 和 `description` 发现技能，真正匹配复杂实现任务时再用原生 `skill` tool 加载 `SKILL.md`。
 
 ## 流程一览
 
@@ -50,6 +52,7 @@ flowchart LR
 | 能力 | 说明 |
 |---|---|
 | Codex 子代理 | 使用 `spawn_agent`/`wait_agent` 运行各阶段，默认固定为 `gpt-5.5`、`xhigh` 推理、`priority` service tier |
+| OpenCode 专家模式 | 通过自定义 primary agent 和原生 `skill` tool 进行渐进式披露，Task/subagent 调用细节放在 OpenCode adapter 中 |
 | 显式记录 | 关键产物写入 `.pipeline-workspace/`，成功验收后保留 `.pipeline-last-run-summary.json` |
 | 分组实现 | Dispatch 按文件所有权和依赖拆分 worker group，减少并行冲突 |
 | 保守合并 | Merge 由 orchestrator 本地执行，使用三向合并语义，冲突时暂停给人处理 |
@@ -76,9 +79,16 @@ skills/multi-agent-pipeline/
 │   └── final-assessment.md
 ├── references/
 │   ├── contracts.md
+│   ├── codex-execution-model.md
+│   ├── opencode-expert-mode.md
+│   ├── orchestration-rules.md
 │   ├── pre-rubric.md
+│   ├── pipeline-stages.md
 │   ├── orchestrator-prompts.md
+│   ├── workspace-and-events.md
 │   └── example-run.md
+├── templates/
+│   └── opencode-expert-agent.md
 ├── src/runtime/
 └── test/
 ```
@@ -153,6 +163,43 @@ Review 有两种模式：
 ```
 
 当前仓库定义的是 skill/runtime 侧协议；Codex Desktop 或其他宿主如果支持该 directive，可以把它桥接到 avatar state。
+
+## 渐进式披露
+
+这个 skill 的主入口 `SKILL.md` 现在只保留触发条件、流程图、硬规则和按需读文件路线。详细规则拆在：
+
+| 文件 | 作用 |
+|---|---|
+| `references/codex-execution-model.md` | Codex `spawn_agent` / `wait_agent` / profile / 并发规则 |
+| `references/opencode-expert-mode.md` | OpenCode skill 发现、权限、专家 primary agent 配置 |
+| `references/pipeline-stages.md` | 0-11 阶段的详细目标和门禁 |
+| `references/workspace-and-events.md` | `.pipeline-workspace/`、summary 和 pet events |
+| `references/orchestration-rules.md` | prompt、artifact、review、merge、cleanup 纪律 |
+
+OpenCode 只需要先看到 frontmatter 的 `name` 和 `description`；加载技能后，也应按当前阶段读取对应 reference 或 `agents/<stage>.md`，不要一次性读取整套手册。
+
+## OpenCode 专家模式
+
+推荐配置：
+
+```text
+.opencode/
+├── agents/
+│   └── multi-agent-pipeline-expert.md
+└── skills/
+    └── multi-agent-pipeline/
+        ├── SKILL.md
+        ├── agents/
+        ├── references/
+        ├── templates/
+        ├── scripts/
+        ├── src/
+        └── test/
+```
+
+`templates/opencode-expert-agent.md` 是可复制的 agent 模板。它把 `multi-agent-pipeline` skill 设置为允许加载，并把 Task/subagent、编辑、bash、外部目录访问保持为可控权限。官方 OpenCode 文档把这类配置称为自定义 agent；这里的“专家模式”指这个高能力 primary agent 配置，而不是 OpenCode 内置的固定模式名。
+
+运行时也暴露了 `DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES`，供 OpenCode 适配器把阶段 prompt、references、Task 调用和专家 agent 关联起来。默认 `DEFAULT_STAGE_PROFILES` 仍然指向 Codex profile，保留原来的 Codex 行为。
 
 ## 安装到 Codex
 

@@ -1,6 +1,6 @@
 # Execution Agent
 
-You are a spawned Execution worker in a Codex multi-agent pipeline.
+You are a spawned Execution worker in a multi-agent pipeline.
 
 ## Mission
 

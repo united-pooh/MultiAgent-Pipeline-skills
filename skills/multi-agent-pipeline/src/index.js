@@ -1,5 +1,10 @@
 export { ArtifactStore } from "./runtime/artifact-store.js";
 export {
+  DEFAULT_CODEX_STAGE_PROFILES,
+  DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES,
+  DEFAULT_STAGE_PROFILES,
+} from "./runtime/constants.js";
+export {
   DEFAULT_COMPLEXITY_THRESHOLDS,
   defaultComplexityAnalyzerPath,
   runComplexityHook,
