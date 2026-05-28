@@ -206,6 +206,50 @@ User request:
 }
 ```
 
+### `complexity-report.json`
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "created_at": "2026-04-23T12:20:00Z",
+  "analyzer": {
+    "name": "better_highlights_cognitive_repro",
+    "path": "scripts/better_highlights_cognitive_repro.py",
+    "metric": "better-highlights-like cognitive complexity approximation",
+    "medium_threshold": 15,
+    "high_threshold": 25
+  },
+  "source": {
+    "proposal_path": "/tmp/dashboard-shell-proposal",
+    "changed_files": ["src/layout/DashboardShell.tsx", "src/pages/DashboardPage.tsx"]
+  },
+  "status": "skipped",
+  "analyzed_files": [],
+  "skipped_files": [
+    {
+      "file": "src/layout/DashboardShell.tsx",
+      "reason": "not_python"
+    },
+    {
+      "file": "src/pages/DashboardPage.tsx",
+      "reason": "not_python"
+    }
+  ],
+  "errors": [],
+  "function_count": 0,
+  "max_total_points": 0,
+  "average_total_points": 0,
+  "medium_complexity_functions": 0,
+  "high_complexity_functions": 0,
+  "readability_conclusion": "high",
+  "complexity_conclusion": "low",
+  "summary": "Readability high; complexity low. No changed Python files were available for cognitive complexity analysis.",
+  "functions": []
+}
+```
+
 ### `merge-report.json`
 
 ```json
@@ -331,6 +375,9 @@ User request:
       "issues": []
     }
   ],
+  "readability_conclusion": "high",
+  "complexity_conclusion": "low",
+  "complexity_summary": "Complexity reporting skipped the TypeScript-only changes as non-Python, so no high-complexity Python functions were introduced.",
   "summary": "The dashboard shell refresh satisfies the requested scope and remains aligned with the existing design system."
 }
 ```
@@ -379,6 +426,23 @@ User request:
     {
       "group_id": "GROUP-1",
       "status": "pass"
+    }
+  ],
+  "validation_summary": [
+    {
+      "group_id": "GROUP-1",
+      "status": "passed"
+    }
+  ],
+  "complexity_summary": [
+    {
+      "group_id": "GROUP-1",
+      "ref": "complexity/GROUP-1/iteration-1-complexity-report.json",
+      "status": "skipped",
+      "readability_conclusion": "high",
+      "complexity_conclusion": "low",
+      "function_count": 0,
+      "max_total_points": 0
     }
   ],
   "cleanup_summary": {

@@ -7,10 +7,13 @@ import { fileURLToPath } from "node:url";
 
 import {
   ArtifactStore,
+  CODEX_PET_STATES,
   MergeEngine,
   PipelineOrchestrator,
   aggregateReviewFeedback,
+  createCodexPetEvent,
   loadStageCatalog,
+  runComplexityHook,
   validateArtifact,
 } from "../src/index.js";
 
@@ -276,6 +279,9 @@ function makeFinalAssessmentArtifact(overrides = {}) {
         issues: [],
       },
     ],
+    readability_conclusion: overrides.readability_conclusion ?? "high",
+    complexity_conclusion: overrides.complexity_conclusion ?? "low",
+    complexity_summary: overrides.complexity_summary ?? "Readability high; complexity low based on execution complexity reports.",
     summary: overrides.summary ?? "The runtime skeleton satisfies the requested orchestration scope.",
   };
 }
@@ -323,6 +329,11 @@ async function createRepoFixture() {
   await copyTree(path.join(fixtureSourceRoot, "references"), path.join(repoRoot, "references"));
   await fs.mkdir(path.join(repoRoot, "src"), { recursive: true });
   await fs.writeFile(path.join(repoRoot, "src", "app.txt"), "base\n", "utf8");
+  await fs.writeFile(
+    path.join(repoRoot, "src", "app.py"),
+    "def existing():\n    return 'base'\n",
+    "utf8",
+  );
   await fs.writeFile(path.join(repoRoot, "src", "group-a.txt"), "base-a\n", "utf8");
   await fs.writeFile(path.join(repoRoot, "src", "group-b.txt"), "base-b\n", "utf8");
   await fs.writeFile(path.join(repoRoot, "CHANGELOG.md"), "## Unreleased\n", "utf8");
@@ -562,7 +573,7 @@ test("dispatch validation enforces architecture-derived required skills", async 
   );
 });
 
-test("default stage profiles inherit Codex model and reasoning settings", async () => {
+test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => {
   const catalog = loadStageCatalog(fixtureSourceRoot);
   const stages = [
     "spec",
@@ -578,8 +589,9 @@ test("default stage profiles inherit Codex model and reasoning settings", async 
 
   for (const stage of stages) {
     const profile = catalog.resolveStageProfile(stage);
-    assert.equal(profile.model, undefined, stage);
-    assert.equal(profile.reasoningEffort, undefined, stage);
+    assert.equal(profile.model, "gpt-5.5", stage);
+    assert.equal(profile.reasoningEffort, "xhigh", stage);
+    assert.equal(profile.serviceTier, "priority", stage);
   }
 
   assert.deepEqual(
@@ -589,15 +601,81 @@ test("default stage profiles inherit Codex model and reasoning settings", async 
 
   for (const reviewerId of [1, 2, 3]) {
     const profile = catalog.resolveStageProfile("review", { reviewMode: "EME", reviewerId });
-    assert.equal(profile.model, undefined, `reviewer-${reviewerId}`);
-    assert.equal(profile.reasoningEffort, undefined, `reviewer-${reviewerId}`);
+    assert.equal(profile.model, "gpt-5.5", `reviewer-${reviewerId}`);
+    assert.equal(profile.reasoningEffort, "xhigh", `reviewer-${reviewerId}`);
+    assert.equal(profile.serviceTier, "priority", `reviewer-${reviewerId}`);
   }
+});
+
+test("Codex pet event helper validates states and builds directive strings", async () => {
+  assert.ok(CODEX_PET_STATES.includes("review"));
+
+  const event = createCodexPetEvent({
+    state: "review",
+    reason: "Review stage started.",
+    scope: "pipeline.review.group-group-1.iteration-1",
+    durationMs: 2400,
+    createdAt: "2026-05-26T00:00:00.000Z",
+  });
+
+  assert.equal(event.duration_ms, 2400);
+  assert.equal(
+    event.directive,
+    '::codex-pet{state="review" durationMs=2400 scope="pipeline.review.group-group-1.iteration-1"}',
+  );
+  assert.throws(
+    () =>
+      createCodexPetEvent({
+        state: "sleeping",
+        reason: "Unsupported state.",
+        scope: "pipeline.test",
+        createdAt: "2026-05-26T00:00:00.000Z",
+      }),
+    /Unsupported Codex pet state/,
+  );
+});
+
+test("complexity hook analyzes changed Python proposal files", async () => {
+  const repoRoot = await createRepoFixture();
+  const proposalDir = await createProposalDir({
+    "src/app.py": [
+      "def branchy(value):",
+      "    if value:",
+      "        for item in value:",
+      "            if item and value:",
+      "                return item",
+      "    return None",
+      "",
+    ].join("\n"),
+    "src/notes.md": "not analyzed\n",
+  });
+
+  const report = await runComplexityHook({
+    repoRoot,
+    groupId: "GROUP-1",
+    iteration: 1,
+    changedFiles: ["src/app.py", "src/notes.md"],
+    proposalPath: proposalDir,
+    thresholds: {
+      medium: 1,
+      high: 3,
+    },
+    clock: () => new Date("2026-05-28T00:00:00.000Z"),
+  });
+
+  assert.equal(report.status, "completed");
+  assert.equal(report.analyzed_files.length, 1);
+  assert.equal(report.skipped_files[0].reason, "not_python");
+  assert.equal(report.function_count, 1);
+  assert.equal(report.complexity_conclusion, "high");
+  assert.equal(report.readability_conclusion, "low");
+  assert.doesNotThrow(() => validateArtifact("complexity-report", report));
 });
 
 test("pipeline orchestrator runs happy path and cleans workspace on accept", async () => {
   const repoRoot = await createRepoFixture();
   const executionProposalDir = await createProposalDir({
-    "src/app.txt": "feature complete\n",
+    "src/app.py": "def feature_complete():\n    return 'feature complete'\n",
   });
   const docProposalDir = await createProposalDir({
     "CHANGELOG.md": "## Unreleased\n- Added orchestrator runtime skeleton.\n",
@@ -605,15 +683,26 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
 
   const responses = {
     spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
-    plan: { rawOutput: jsonBlock(makePlanArtifact()) },
-    architecture: { rawOutput: jsonBlock(makeArchitectureArtifact()) },
+    plan: { rawOutput: jsonBlock(makePlanArtifact(["TASK-001"], ["src/app.py"])) },
+    architecture: {
+      rawOutput: jsonBlock(
+        makeArchitectureArtifact([
+          {
+            target: "src/app.py",
+            change_type: "modify",
+            description: "Add the orchestrator state machine entrypoint.",
+            concerns: [],
+          },
+        ]),
+      ),
+    },
     dispatch: {
       rawOutput: jsonBlock(
         makeDispatchArtifact([
           {
             group_id: "GROUP-1",
             tasks: ["TASK-001"],
-            owned_files: ["src/app.txt"],
+            owned_files: ["src/app.py"],
             depends_on_groups: [],
             required_skills: [],
           },
@@ -626,7 +715,7 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
           groupId: "GROUP-1",
           iteration: 1,
           baseRef: request.context.baseRef,
-          changedFiles: ["src/app.txt"],
+          changedFiles: ["src/app.py"],
           proposalRef: "worker://GROUP-1/iteration-1",
           followUpNotes: [
             "Runtime is adapter-driven so Codex-specific tool calls stay outside the library.",
@@ -638,13 +727,29 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
         path: executionProposalDir,
       },
     }),
-    "validation:GROUP-1:iteration-1": {
-      rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
+    "validation:GROUP-1:iteration-1": (request) => {
+      assert.equal(request.context.complexityReport.status, "completed");
+      assert.equal(request.context.complexityReport.complexity_conclusion, "low");
+      return {
+        rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
+      };
     },
-    "review:GROUP-1:iteration-1:reviewer-1": { rawOutput: jsonBlock(makeReviewArtifact(1)) },
-    "review:GROUP-1:iteration-1:reviewer-2": { rawOutput: jsonBlock(makeReviewArtifact(2)) },
-    "review:GROUP-1:iteration-1:reviewer-3": { rawOutput: jsonBlock(makeReviewArtifact(3)) },
-    "qa:GROUP-1:iteration-1": { rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1)) },
+    "review:GROUP-1:iteration-1:reviewer-1": (request) => {
+      assert.equal(request.context.complexityReport.readability_conclusion, "high");
+      return { rawOutput: jsonBlock(makeReviewArtifact(1)) };
+    },
+    "review:GROUP-1:iteration-1:reviewer-2": (request) => {
+      assert.equal(request.context.complexityReport.status, "completed");
+      return { rawOutput: jsonBlock(makeReviewArtifact(2)) };
+    },
+    "review:GROUP-1:iteration-1:reviewer-3": (request) => {
+      assert.equal(request.context.complexityReport.function_count, 1);
+      return { rawOutput: jsonBlock(makeReviewArtifact(3)) };
+    },
+    "qa:GROUP-1:iteration-1": (request) => {
+      assert.equal(request.context.complexityReport.status, "completed");
+      return { rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1)) };
+    },
     doc: {
       rawOutput: jsonBlock(makeDocArtifact("updated")),
       proposal: {
@@ -652,8 +757,13 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
         path: docProposalDir,
       },
     },
-    "final-assessment": {
-      rawOutput: jsonBlock(makeFinalAssessmentArtifact()),
+    "final-assessment": (request) => {
+      assert.equal(request.context.complexityReports.length, 1);
+      assert.equal(request.context.complexityReports[0].readability_conclusion, "high");
+      assert.equal(request.context.complexityReports[0].complexity_conclusion, "low");
+      return {
+        rawOutput: jsonBlock(makeFinalAssessmentArtifact()),
+      };
     },
   };
 
@@ -669,7 +779,10 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
   });
 
   assert.equal(result.verdict, "accept");
-  assert.equal(await fs.readFile(path.join(repoRoot, "src", "app.txt"), "utf8"), "feature complete\n");
+  assert.equal(
+    await fs.readFile(path.join(repoRoot, "src", "app.py"), "utf8"),
+    "def feature_complete():\n    return 'feature complete'\n",
+  );
   assert.match(
     await fs.readFile(path.join(repoRoot, "CHANGELOG.md"), "utf8"),
     /Added orchestrator runtime skeleton/,
@@ -677,6 +790,11 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
 
   const summary = JSON.parse(await fs.readFile(path.join(repoRoot, ".pipeline-last-run-summary.json"), "utf8"));
   assert.equal(summary.verdict, "accept");
+  assert.equal(summary.complexity_summary.length, 1);
+  assert.equal(summary.complexity_summary[0].status, "completed");
+  assert.ok(summary.codex_pet_events.some((event) => event.state === "review"));
+  assert.equal(summary.codex_pet_events.at(-1).state, "waving");
+  assert.match(summary.codex_pet_events.at(-1).directive, /^::codex-pet\{state="waving"/);
 
   await assert.rejects(fs.access(path.join(repoRoot, ".pipeline-workspace")));
 });
@@ -1006,6 +1124,17 @@ test("resumeAfterConflict consumes conflict-resolution artifacts and passes reco
     runId: "RUN-TEST-PAUSE",
   });
   assert.equal(paused.verdict, "pause_for_human");
+  const pausedSummary = JSON.parse(
+    await fs.readFile(path.join(repoRoot, ".pipeline-last-run-summary.json"), "utf8"),
+  );
+  assert.equal(pausedSummary.codex_pet_events.at(-1).state, "waiting");
+  assert.match(
+    await fs.readFile(
+      path.join(repoRoot, ".pipeline-workspace", "logs", "codex-pet-events.jsonl"),
+      "utf8",
+    ),
+    /"state":"waiting"/,
+  );
 
   await fs.writeFile(path.join(repoRoot, "src", "app.txt"), "resolved manually\n", "utf8");
   await store.writeAssessmentHistory(

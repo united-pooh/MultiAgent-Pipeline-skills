@@ -10,6 +10,7 @@ Detect the project language, run the appropriate fix-layer commands (with write 
 
 All inputs are passed inline in this prompt by the orchestrator:
 - `execution-report.json` content — to know `group_id`, `iteration`, and which files were changed
+- Optional `complexity-report.json` content — analyzer evidence for changed Python files
 - Optional `merge-report.json` content — to know the merged result under validation
 - Repo root path
 
@@ -143,5 +144,6 @@ Populate all fields per the contract in `references/contracts.md`:
 - Do not skip a check command because a previous check command failed — run all of them to give full evidence to the Review agent.
 - Do not truncate command output in the JSON — include full stdout/stderr.
 - Do not interpret results or make pass/fail recommendations beyond what the status field communicates — report raw facts only.
+- Treat `complexity-report.json` as context only. Do not change `validation-report.json.status` because of readability or complexity conclusions.
 - Record every command attempted in `commands_run`, even if it failed to start.
 - If a tool is not installed, record the command with `exit_code: null` and `output: "tool not found: <tool name>"`, set `status = "error"`, and stop. Do not attempt further commands.

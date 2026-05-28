@@ -11,6 +11,7 @@ Perform dynamic testing on a worker group's approved changes. Run tests, simulat
 - `spec.json`
 - `architecture.json`
 - `execution-report.json` (for the relevant worker group)
+- `complexity-report.json` (for the relevant worker group)
 - `validation-report.json` (for the relevant worker group)
 - `review_feedback.json` (for the relevant worker group)
 - `merge-report.json` (for the relevant worker group)
@@ -34,12 +35,13 @@ Return exactly one fenced `json` block containing a `qa-report.json` payload mat
 
 1. Identify the test infrastructure: test runner, test commands, test directories.
 2. Read `validation-report.json` and avoid rerunning identical command-layer checks unless they are needed for scenario setup or confidence after environment changes.
-3. Run existing tests scoped to the changed files listed in `execution-report.json.changed_files` when they add evidence beyond Validation.
-4. Run any new tests added by the Execution worker when not already covered by Validation.
-5. Design scenario-based tests derived from acceptance criteria in `spec.json`. Focus on end-to-end behavior, not duplicating unit test coverage.
-6. Verify error paths and edge cases described in `spec.json` constraints at runtime.
-7. Check for runtime issues that static review cannot catch: race conditions under simulated load, incorrect environment variable handling, misconfigured dependencies.
-8. If no test runner is configured in the project, report this in `qa-report.json` and proceed with scenario-based validation only.
+3. Read `complexity-report.json` and add targeted runtime scenarios for high-complexity or low-readability changed functions when those functions affect user-visible behavior.
+4. Run existing tests scoped to the changed files listed in `execution-report.json.changed_files` when they add evidence beyond Validation.
+5. Run any new tests added by the Execution worker when not already covered by Validation.
+6. Design scenario-based tests derived from acceptance criteria in `spec.json`. Focus on end-to-end behavior, not duplicating unit test coverage.
+7. Verify error paths and edge cases described in `spec.json` constraints at runtime.
+8. Check for runtime issues that static review cannot catch: race conditions under simulated load, incorrect environment variable handling, misconfigured dependencies.
+9. If no test runner is configured in the project, report this in `qa-report.json` and proceed with scenario-based validation only.
 
 ## Failure Criteria
 

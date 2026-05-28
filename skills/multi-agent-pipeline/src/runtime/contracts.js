@@ -4,6 +4,7 @@ import {
   PRE_CRITERIA,
 } from "./constants.js";
 import { ContractValidationError } from "./errors.js";
+import { CODEX_PET_STATES } from "./pet-events.js";
 import { uniqueStrings } from "./utils.js";
 
 function fail(artifactName, message) {
@@ -26,6 +27,14 @@ function expectString(value, fieldName, artifactName) {
   return value;
 }
 
+function expectStringValue(value, fieldName, artifactName) {
+  if (typeof value !== "string") {
+    fail(artifactName, `${fieldName} must be a string`);
+  }
+
+  return value;
+}
+
 function expectNullableString(value, fieldName, artifactName) {
   if (value !== null && (typeof value !== "string" || value.trim() === "")) {
     fail(artifactName, `${fieldName} must be null or a non-empty string`);
@@ -37,6 +46,18 @@ function expectNullableString(value, fieldName, artifactName) {
 function expectInteger(value, fieldName, artifactName, { min = null } = {}) {
   if (!Number.isInteger(value)) {
     fail(artifactName, `${fieldName} must be an integer`);
+  }
+
+  if (min !== null && value < min) {
+    fail(artifactName, `${fieldName} must be >= ${min}`);
+  }
+
+  return value;
+}
+
+function expectNumber(value, fieldName, artifactName, { min = null } = {}) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    fail(artifactName, `${fieldName} must be a finite number`);
   }
 
   if (min !== null && value < min) {
@@ -654,6 +675,113 @@ function validateMergeReport(artifact) {
   return report;
 }
 
+function validateComplexityReport(artifact) {
+  const artifactName = "complexity-report";
+  const report = expectObject(artifact, artifactName, artifactName);
+  expectVersion(report.version, artifactName);
+  expectString(report.group_id, "group_id", artifactName);
+  expectInteger(report.iteration, "iteration", artifactName, { min: 1 });
+  expectString(report.created_at, "created_at", artifactName);
+
+  const analyzer = expectObject(report.analyzer, "analyzer", artifactName);
+  expectString(analyzer.name, "analyzer.name", artifactName);
+  expectString(analyzer.path, "analyzer.path", artifactName);
+  expectString(analyzer.metric, "analyzer.metric", artifactName);
+  expectInteger(analyzer.medium_threshold, "analyzer.medium_threshold", artifactName, { min: 0 });
+  expectInteger(analyzer.high_threshold, "analyzer.high_threshold", artifactName, { min: 0 });
+
+  const source = expectObject(report.source, "source", artifactName);
+  expectNullableString(source.proposal_path, "source.proposal_path", artifactName);
+  expectStringArray(source.changed_files, "source.changed_files", artifactName);
+
+  expectEnum(report.status, "status", artifactName, ["completed", "skipped", "error"]);
+
+  const analyzedFiles = expectArray(report.analyzed_files, "analyzed_files", artifactName);
+  analyzedFiles.forEach((file, index) => {
+    const entry = expectObject(file, `analyzed_files[${index}]`, artifactName);
+    expectString(entry.file, `analyzed_files[${index}].file`, artifactName);
+    expectString(entry.source_path, `analyzed_files[${index}].source_path`, artifactName);
+    expectInteger(entry.function_count, `analyzed_files[${index}].function_count`, artifactName, {
+      min: 0,
+    });
+  });
+
+  const skippedFiles = expectArray(report.skipped_files, "skipped_files", artifactName);
+  skippedFiles.forEach((file, index) => {
+    const entry = expectObject(file, `skipped_files[${index}]`, artifactName);
+    expectString(entry.file, `skipped_files[${index}].file`, artifactName);
+    expectEnum(entry.reason, `skipped_files[${index}].reason`, artifactName, [
+      "not_python",
+      "invalid_path",
+      "missing_in_proposal",
+      "missing_in_repo",
+    ]);
+  });
+
+  const errors = expectArray(report.errors, "errors", artifactName);
+  errors.forEach((error, index) => {
+    const entry = expectObject(error, `errors[${index}]`, artifactName);
+    expectString(entry.file, `errors[${index}].file`, artifactName);
+    expectString(entry.message, `errors[${index}].message`, artifactName);
+    expectNullableInteger(entry.exit_code, `errors[${index}].exit_code`, artifactName, {
+      min: 0,
+    });
+    expectStringValue(entry.stdout, `errors[${index}].stdout`, artifactName);
+    expectStringValue(entry.stderr, `errors[${index}].stderr`, artifactName);
+  });
+
+  expectInteger(report.function_count, "function_count", artifactName, { min: 0 });
+  expectInteger(report.max_total_points, "max_total_points", artifactName, { min: 0 });
+  expectNumber(report.average_total_points, "average_total_points", artifactName, { min: 0 });
+  expectInteger(report.medium_complexity_functions, "medium_complexity_functions", artifactName, {
+    min: 0,
+  });
+  expectInteger(report.high_complexity_functions, "high_complexity_functions", artifactName, {
+    min: 0,
+  });
+  expectEnum(report.readability_conclusion, "readability_conclusion", artifactName, [
+    "high",
+    "low",
+  ]);
+  expectEnum(report.complexity_conclusion, "complexity_conclusion", artifactName, [
+    "high",
+    "low",
+  ]);
+  expectString(report.summary, "summary", artifactName);
+
+  const functions = expectArray(report.functions, "functions", artifactName);
+  functions.forEach((item, index) => {
+    const entry = expectObject(item, `functions[${index}]`, artifactName);
+    expectString(entry.file, `functions[${index}].file`, artifactName);
+    expectString(entry.function, `functions[${index}].function`, artifactName);
+    expectString(entry.analyzer_function, `functions[${index}].analyzer_function`, artifactName);
+    expectInteger(entry.loop_points, `functions[${index}].loop_points`, artifactName, { min: 0 });
+    expectInteger(entry.if_points, `functions[${index}].if_points`, artifactName, { min: 0 });
+    expectInteger(entry.logical_points, `functions[${index}].logical_points`, artifactName, {
+      min: 0,
+    });
+    expectInteger(entry.other_points, `functions[${index}].other_points`, artifactName, { min: 0 });
+    expectInteger(entry.total_points, `functions[${index}].total_points`, artifactName, {
+      min: 0,
+    });
+    expectEnum(entry.level, `functions[${index}].level`, artifactName, [
+      "low",
+      "medium",
+      "high",
+    ]);
+  });
+
+  if (report.status === "error" && errors.length === 0) {
+    fail(artifactName, "errors must be non-empty when status is error");
+  }
+
+  if (report.status === "completed" && analyzedFiles.length === 0) {
+    fail(artifactName, "analyzed_files must be non-empty when status is completed");
+  }
+
+  return report;
+}
+
 function validateConflictResolution(artifact, context = {}) {
   const artifactName = "conflict-resolution";
   const resolution = expectObject(artifact, artifactName, artifactName);
@@ -1008,6 +1136,31 @@ function validateSkillUsageSummary(value, artifactName) {
   });
 }
 
+function validateCodexPetEvents(value, artifactName) {
+  const events = expectArray(value, "codex_pet_events", artifactName);
+  events.forEach((item, index) => {
+    const entry = expectObject(item, `codex_pet_events[${index}]`, artifactName);
+    expectEnum(
+      entry.state,
+      `codex_pet_events[${index}].state`,
+      artifactName,
+      CODEX_PET_STATES,
+    );
+    expectString(entry.reason, `codex_pet_events[${index}].reason`, artifactName);
+    expectString(entry.scope, `codex_pet_events[${index}].scope`, artifactName);
+    expectInteger(
+      entry.duration_ms,
+      `codex_pet_events[${index}].duration_ms`,
+      artifactName,
+      { min: 0 },
+    );
+    expectString(entry.created_at, `codex_pet_events[${index}].created_at`, artifactName);
+    expectString(entry.directive, `codex_pet_events[${index}].directive`, artifactName);
+  });
+
+  return events;
+}
+
 function validateFinalAssessment(artifact) {
   const artifactName = "final-assessment";
   const assessment = expectObject(artifact, artifactName, artifactName);
@@ -1075,6 +1228,15 @@ function validateFinalAssessment(artifact) {
   }
 
   validateSkillUsageSummary(assessment.skill_usage_summary, artifactName);
+  expectEnum(assessment.readability_conclusion, "readability_conclusion", artifactName, [
+    "high",
+    "low",
+  ]);
+  expectEnum(assessment.complexity_conclusion, "complexity_conclusion", artifactName, [
+    "high",
+    "low",
+  ]);
+  expectString(assessment.complexity_summary, "complexity_summary", artifactName);
   expectString(assessment.summary, "summary", artifactName);
   return assessment;
 }
@@ -1140,6 +1302,43 @@ function validateRunSummary(artifact) {
     ]);
   });
 
+  const complexitySummary = expectArray(
+    summary.complexity_summary,
+    "complexity_summary",
+    artifactName,
+  );
+  complexitySummary.forEach((entry, index) => {
+    const item = expectObject(entry, `complexity_summary[${index}]`, artifactName);
+    expectString(item.group_id, `complexity_summary[${index}].group_id`, artifactName);
+    expectString(item.ref, `complexity_summary[${index}].ref`, artifactName);
+    expectEnum(item.status, `complexity_summary[${index}].status`, artifactName, [
+      "completed",
+      "skipped",
+      "error",
+    ]);
+    expectEnum(
+      item.readability_conclusion,
+      `complexity_summary[${index}].readability_conclusion`,
+      artifactName,
+      ["high", "low"],
+    );
+    expectEnum(
+      item.complexity_conclusion,
+      `complexity_summary[${index}].complexity_conclusion`,
+      artifactName,
+      ["high", "low"],
+    );
+    expectInteger(item.function_count, `complexity_summary[${index}].function_count`, artifactName, {
+      min: 0,
+    });
+    expectInteger(
+      item.max_total_points,
+      `complexity_summary[${index}].max_total_points`,
+      artifactName,
+      { min: 0 },
+    );
+  });
+
   const cleanupSummary = expectObject(summary.cleanup_summary, "cleanup_summary", artifactName);
   if (typeof cleanupSummary.deleted_workspace !== "boolean") {
     fail(artifactName, "cleanup_summary.deleted_workspace must be boolean");
@@ -1149,6 +1348,8 @@ function validateRunSummary(artifact) {
   if (cleanupSummary.retained_file !== ".pipeline-last-run-summary.json") {
     fail(artifactName, "cleanup_summary.retained_file must be .pipeline-last-run-summary.json");
   }
+
+  validateCodexPetEvents(summary.codex_pet_events, artifactName);
 
   return summary;
 }
@@ -1187,6 +1388,8 @@ export function validateArtifact(artifactType, artifact, context = {}) {
       return validateExecutionReport(artifact, context);
     case "merge-report":
       return validateMergeReport(artifact);
+    case "complexity-report":
+      return validateComplexityReport(artifact);
     case "conflict-resolution":
       return validateConflictResolution(artifact, context);
     case "review-individual":

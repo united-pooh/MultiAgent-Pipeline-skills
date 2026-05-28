@@ -37,6 +37,7 @@ export class ArtifactStore {
     await Promise.all([
       "bases",
       "execution",
+      "complexity",
       "merge",
       "validation",
       "conflict_resolutions",
@@ -68,6 +69,12 @@ export class ArtifactStore {
     await fs.appendFile(logPath, `[${nowIso(this.clock)}] ${message}\n`, "utf8");
   }
 
+  async appendPetEvent(event) {
+    const logPath = path.join(this.workspaceRoot, "logs", "codex-pet-events.jsonl");
+    await ensureDir(path.dirname(logPath));
+    await fs.appendFile(logPath, `${JSON.stringify(event)}\n`, "utf8");
+  }
+
   async writeRootArtifact(stage, artifact) {
     const absolutePath = this.rootArtifactPath(stage);
     await writeJson(absolutePath, artifact);
@@ -94,6 +101,17 @@ export class ArtifactStore {
       `iteration-${iteration}-execution-report.json`,
     );
     await writeJson(this.workspacePath(relativePath), artifact);
+    return relativePath;
+  }
+
+  async writeComplexityReport(groupId, iteration, artifact) {
+    const validated = validateArtifact("complexity-report", artifact);
+    const relativePath = path.posix.join(
+      "complexity",
+      groupId,
+      `iteration-${iteration}-complexity-report.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
     return relativePath;
   }
 
@@ -224,6 +242,10 @@ export class ArtifactStore {
 
   async readGroupExecutionHistory(groupId) {
     return this.listWorkspaceArtifacts(path.posix.join("execution", groupId));
+  }
+
+  async readGroupComplexityReports(groupId) {
+    return this.listWorkspaceArtifacts(path.posix.join("complexity", groupId));
   }
 
   async readGroupMergeHistory(groupId) {

@@ -49,13 +49,14 @@ flowchart LR
 
 | 能力 | 说明 |
 |---|---|
-| Codex 子代理 | 使用 `spawn_agent`/`wait_agent` 运行各阶段，默认继承当前模型和推理设置 |
+| Codex 子代理 | 使用 `spawn_agent`/`wait_agent` 运行各阶段，默认固定为 `gpt-5.5`、`xhigh` 推理、`priority` service tier |
 | 显式记录 | 关键产物写入 `.pipeline-workspace/`，成功验收后保留 `.pipeline-last-run-summary.json` |
 | 分组实现 | Dispatch 按文件所有权和依赖拆分 worker group，减少并行冲突 |
 | 保守合并 | Merge 由 orchestrator 本地执行，使用三向合并语义，冲突时暂停给人处理 |
 | 多语言验证 | Validation 根据项目标记自动选择 Go、Python、JavaScript/TypeScript、Rust、Java、Ruby 的 fix/check 命令 |
 | 独立审查 | Review 支持 EME 三审或 PRE 单审，按 8 个质量维度给出证据 |
 | 场景 QA | QA 补充运行时和用户场景验证，不重复命令层验证 |
+| Codex pet 事件 | Runtime 会输出 `codex_pet_events`，把 pipeline 阶段映射到 `running`、`review`、`failed`、`waiting`、`waving` 等 Codex avatar state |
 
 ## 文件结构
 
@@ -93,6 +94,7 @@ skills/multi-agent-pipeline/
 ├── architecture.json
 ├── dispatch.json
 ├── execution/
+├── complexity/
 ├── merge/
 ├── validation/
 ├── review_history/
@@ -112,12 +114,14 @@ skills/multi-agent-pipeline/
 | `architecture.json` | 代码分析、架构决策、文件级改动意图 |
 | `dispatch.json` | worker group、文件所有权、执行波次 |
 | `execution-report.json` | 每个工作组的实现报告 |
+| `complexity-report.json` | Execution 后对 changed Python 文件运行的认知复杂度报告，包含可读性高/低和复杂度高/低结论 |
 | `merge-report.json` | 合并结果或冲突记录 |
 | `validation-report.json` | 自动命令验证结果 |
 | `review_feedback.json` | Review 聚合结果 |
 | `qa-report.json` | 场景和运行时验证结果 |
 | `doc-report.json` | 文档更新结果 |
 | `final-assessment.json` | 最终验收或重启点判断 |
+| `codex_pet_events` | `.pipeline-last-run-summary.json` 内的 pet state 事件列表，可供支持 `::codex-pet{...}` 的宿主或事件桥消费 |
 
 ## 检查机制
 
@@ -129,6 +133,26 @@ Review 有两种模式：
 | EME | 三个 reviewer 独立审查并按维度多数投票，默认模式，适合复杂任务 |
 
 8 个维度包括正确性、安全性、性能、错误处理、代码质量、架构一致性、测试覆盖和向后兼容。
+
+## Codex Pet 状态事件
+
+运行时会在关键阶段记录 pet 状态事件：
+
+| 场景 | 状态 |
+|---|---|
+| 阶段执行中 | `running` |
+| Review / Final Assessment | `review` |
+| 验证或审查失败 | `failed` |
+| 合并冲突或等待人工处理 | `waiting` |
+| 最终接受 | `waving` |
+
+事件会写入 `.pipeline-workspace/logs/codex-pet-events.jsonl`。运行结束后，`.pipeline-last-run-summary.json` 会保留同一组 `codex_pet_events`。每个事件同时带有 `directive` 字段，例如：
+
+```text
+::codex-pet{state="review" durationMs=2400 scope="pipeline.review.group-group-1.iteration-1"}
+```
+
+当前仓库定义的是 skill/runtime 侧协议；Codex Desktop 或其他宿主如果支持该 directive，可以把它桥接到 avatar state。
 
 ## 安装到 Codex
 

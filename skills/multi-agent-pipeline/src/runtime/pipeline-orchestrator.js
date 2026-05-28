@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import { ArtifactStore } from "./artifact-store.js";
+import { runComplexityHook } from "./complexity-hook.js";
 import { DEFAULT_REVIEW_MODE } from "./constants.js";
 import { extractSingleJsonBlock, validateArtifact } from "./contracts.js";
 import {
@@ -10,6 +11,7 @@ import {
   StageExecutionError,
 } from "./errors.js";
 import { MergeEngine } from "./merge-engine.js";
+import { createCodexPetEvent } from "./pet-events.js";
 import { aggregateReviewFeedback } from "./review-feedback.js";
 import { loadStageCatalog } from "./stage-catalog.js";
 import { nowIso, sanitizeForPath, uniqueStrings } from "./utils.js";
@@ -37,6 +39,25 @@ function artifactTypeForStage(stage) {
   }
 }
 
+function petStateForStage(stage) {
+  if (stage === "review" || stage === "final-assessment") {
+    return "review";
+  }
+
+  return "running";
+}
+
+function petScopeForStage(stage, context) {
+  const groupId = context.workerGroup?.group_id;
+  const iteration = context.iteration;
+  const suffix = [
+    groupId ? `group-${sanitizeForPath(groupId)}` : null,
+    Number.isInteger(iteration) ? `iteration-${iteration}` : null,
+  ].filter(Boolean);
+
+  return ["pipeline", stage, ...suffix].join(".");
+}
+
 function skillIssues(requiredSkills, appliedSkills) {
   const missing = requiredSkills.filter((skill) => !appliedSkills.includes(skill));
   const extra = appliedSkills.filter((skill) => !requiredSkills.includes(skill));
@@ -57,11 +78,13 @@ function buildEmptyGroupState(workerGroup) {
   return {
     workerGroup,
     executionHistory: [],
+    complexityHistory: [],
     mergeHistory: [],
     validationHistory: [],
     reviewFeedbackHistory: [],
     reviewerArtifacts: [],
     finalExecution: null,
+    finalComplexity: null,
     finalMerge: null,
     finalValidation: null,
     finalReviewFeedback: null,
@@ -75,6 +98,10 @@ function latestEntry(entries) {
 
 function latestMergeEntry(state) {
   return state.finalMerge ?? latestEntry(state.mergeHistory);
+}
+
+function latestComplexityEntry(state) {
+  return state.finalComplexity ?? latestEntry(state.complexityHistory);
 }
 
 function latestReviewEntry(state) {
@@ -109,15 +136,28 @@ function latestFailedValidationReport(state) {
 
 function nextExecutionIteration(state) {
   const latestExecutionIteration = latestEntry(state.executionHistory)?.artifact?.iteration ?? 0;
+  const latestComplexityIteration = latestEntry(state.complexityHistory)?.artifact?.iteration ?? 0;
   const latestMergeIteration = latestEntry(state.mergeHistory)?.artifact?.iteration ?? 0;
   const latestValidationIteration = latestEntry(state.validationHistory)?.artifact?.iteration ?? 0;
   const latestReviewIteration = latestEntry(state.reviewFeedbackHistory)?.artifact?.iteration ?? 0;
   return Math.max(
     latestExecutionIteration,
+    latestComplexityIteration,
     latestMergeIteration,
     latestValidationIteration,
     latestReviewIteration,
   ) + 1;
+}
+
+function findComplexityForIteration(state, iteration) {
+  for (let index = state.complexityHistory.length - 1; index >= 0; index -= 1) {
+    const entry = state.complexityHistory[index];
+    if (entry.artifact.iteration === iteration) {
+      return entry;
+    }
+  }
+
+  return null;
 }
 
 function findReviewFeedbackForIteration(state, iteration) {
@@ -207,6 +247,7 @@ function buildRunSummary({
   groupStates,
   deletedWorkspace,
   clock,
+  codexPetEvents,
 }) {
   const states = [...groupStates.values()];
   return {
@@ -242,11 +283,26 @@ function buildRunSummary({
         group_id: state.workerGroup.group_id,
         status: latestValidationEntry(state).artifact.status,
       })),
+    complexity_summary: states
+      .filter((state) => latestComplexityEntry(state))
+      .map((state) => {
+        const entry = latestComplexityEntry(state);
+        return {
+          group_id: state.workerGroup.group_id,
+          ref: entry.ref,
+          status: entry.artifact.status,
+          readability_conclusion: entry.artifact.readability_conclusion,
+          complexity_conclusion: entry.artifact.complexity_conclusion,
+          function_count: entry.artifact.function_count,
+          max_total_points: entry.artifact.max_total_points,
+        };
+      }),
     cleanup_summary: {
       deleted_workspace: deletedWorkspace,
       deleted_paths: deletedWorkspace ? [".pipeline-workspace"] : [],
       retained_file: ".pipeline-last-run-summary.json",
     },
+    codex_pet_events: codexPetEvents,
   };
 }
 
@@ -260,6 +316,7 @@ export class PipelineOrchestrator {
     artifactStore = null,
     stageCatalog = null,
     mergeEngine = null,
+    complexityHook = runComplexityHook,
   }) {
     if (!repoRoot) {
       throw new Error("PipelineOrchestrator requires repoRoot");
@@ -277,6 +334,21 @@ export class PipelineOrchestrator {
     this.artifactStore = artifactStore ?? new ArtifactStore({ repoRoot, clock });
     this.stageCatalog = stageCatalog ?? loadStageCatalog(repoRoot);
     this.mergeEngine = mergeEngine ?? new MergeEngine({ repoRoot, artifactStore: this.artifactStore });
+    this.complexityHook = complexityHook;
+    this.codexPetEvents = [];
+  }
+
+  async emitPetEvent({ state, reason, scope, durationMs = 1800 }) {
+    const event = createCodexPetEvent({
+      state,
+      reason,
+      scope,
+      durationMs,
+      createdAt: nowIso(this.clock),
+    });
+    this.codexPetEvents.push(event);
+    await this.artifactStore.appendPetEvent(event);
+    return event;
   }
 
   async run({ request, runId = `RUN-${nowIso(this.clock).replace(/[-:.TZ]/g, "").slice(0, 14)}` }) {
@@ -284,8 +356,15 @@ export class PipelineOrchestrator {
       throw new Error("run() requires a non-empty request string");
     }
 
+    this.codexPetEvents = [];
     await this.artifactStore.initializeRun();
     await this.artifactStore.appendLog(`run ${runId} started`);
+    await this.emitPetEvent({
+      state: "running",
+      reason: `Pipeline run ${runId} started.`,
+      scope: "pipeline.start",
+      durationMs: 1800,
+    });
 
     const groupStates = new Map();
     let spec;
@@ -354,6 +433,13 @@ export class PipelineOrchestrator {
     }
 
     await this.artifactStore.appendLog(`resume ${runId} started`);
+    this.codexPetEvents = [];
+    await this.emitPetEvent({
+      state: "running",
+      reason: `Pipeline resume ${runId} started.`,
+      scope: "pipeline.resume",
+      durationMs: 1800,
+    });
 
     const spec = await this.artifactStore.readRootArtifact("spec");
     const plan = await this.artifactStore.readRootArtifact("plan");
@@ -426,12 +512,14 @@ export class PipelineOrchestrator {
     for (const workerGroup of dispatch.worker_groups) {
       const state = buildEmptyGroupState(workerGroup);
       state.executionHistory = await this.artifactStore.readGroupExecutionHistory(workerGroup.group_id);
+      state.complexityHistory = await this.artifactStore.readGroupComplexityReports(workerGroup.group_id);
       state.mergeHistory = await this.artifactStore.readGroupMergeHistory(workerGroup.group_id);
       state.validationHistory = await this.artifactStore.readGroupValidationReports(workerGroup.group_id);
       state.reviewFeedbackHistory = await this.artifactStore.readGroupReviewFeedbackHistory(
         workerGroup.group_id,
       );
       state.finalExecution = latestEntry(state.executionHistory);
+      state.finalComplexity = latestEntry(state.complexityHistory);
       state.finalMerge = latestEntry(state.mergeHistory);
       state.finalValidation = latestEntry(state.validationHistory);
       state.finalReviewFeedback = latestEntry(state.reviewFeedbackHistory);
@@ -510,6 +598,7 @@ export class PipelineOrchestrator {
               validationResult: state.finalValidation,
               mergeResult: state.finalMerge,
               reviewFeedback: state.finalReviewFeedback,
+              complexityResult: state.finalComplexity,
             }),
           ),
         );
@@ -536,6 +625,9 @@ export class PipelineOrchestrator {
       spec,
       architecture,
       executionResults: [...groupStates.values()].map((state) => state.finalExecution.artifact),
+      complexityReports: [...groupStates.values()]
+        .filter((state) => state.finalComplexity)
+        .map((state) => state.finalComplexity.artifact),
     });
     const previousAssessments = (await this.artifactStore.readAssessmentHistory()).map(
       (entry) => entry.artifact,
@@ -556,6 +648,9 @@ export class PipelineOrchestrator {
       ),
       validationReports: [...groupStates.values()].flatMap((state) =>
         state.validationHistory.map((entry) => entry.artifact),
+      ),
+      complexityReports: [...groupStates.values()].flatMap((state) =>
+        state.complexityHistory.map((entry) => entry.artifact),
       ),
       conflictResolutions,
       reviewFeedbacks: [...groupStates.values()].flatMap((state) =>
@@ -583,6 +678,12 @@ export class PipelineOrchestrator {
       finalAssessment,
     });
     const shouldDeleteWorkspace = finalAssessment.verdict === "accept";
+    await this.emitPetEvent({
+      state: finalAssessment.verdict === "accept" ? "waving" : "failed",
+      reason: `Pipeline run ${runId} finished with verdict ${finalAssessment.verdict}.`,
+      scope: "pipeline.finish",
+      durationMs: finalAssessment.verdict === "accept" ? 2400 : 3200,
+    });
     const summary = buildRunSummary({
       runId,
       verdict: finalAssessment.verdict,
@@ -591,6 +692,7 @@ export class PipelineOrchestrator {
       groupStates,
       deletedWorkspace: shouldDeleteWorkspace,
       clock: this.clock,
+      codexPetEvents: this.codexPetEvents,
     });
     await this.artifactStore.writeRunSummary(summary);
 
@@ -630,6 +732,12 @@ export class PipelineOrchestrator {
       finalAssessment,
     });
     const verdict = error instanceof PipelinePauseForHumanError ? "pause_for_human" : "reject";
+    await this.emitPetEvent({
+      state: verdict === "pause_for_human" ? "waiting" : "failed",
+      reason: `Pipeline run ${runId} ended with ${verdict} at ${error.restartFrom}.`,
+      scope: `pipeline.${error.restartFrom}`,
+      durationMs: verdict === "pause_for_human" ? 3600 : 3200,
+    });
     const summary = buildRunSummary({
       runId,
       verdict,
@@ -638,6 +746,7 @@ export class PipelineOrchestrator {
       groupStates,
       deletedWorkspace: false,
       clock: this.clock,
+      codexPetEvents: this.codexPetEvents,
     });
     await this.artifactStore.writeRunSummary(summary);
     await this.artifactStore.appendLog(`${verdict} at ${error.restartFrom}: ${error.message}`);
@@ -662,6 +771,12 @@ export class PipelineOrchestrator {
 
     for (let attempt = 1; attempt <= this.maxStageRetries + 1; attempt += 1) {
       try {
+        await this.emitPetEvent({
+          state: petStateForStage(stage),
+          reason: `${stage} stage started${attempt > 1 ? ` retry ${attempt}` : ""}.`,
+          scope: petScopeForStage(stage, context),
+          durationMs: stage === "review" || stage === "final-assessment" ? 2400 : 1800,
+        });
         const request = await this.stageCatalog.buildStageRequest(stage, {
           ...context,
           reviewMode: context.reviewMode ?? this.reviewMode,
@@ -755,6 +870,11 @@ export class PipelineOrchestrator {
       );
     }
 
+    const complexityResult = await this.runExecutionComplexityHook({
+      groupState,
+      iteration,
+      executionResult,
+    });
     const executionRef = await this.artifactStore.writeExecutionReport(
       groupState.workerGroup.group_id,
       iteration,
@@ -766,12 +886,39 @@ export class PipelineOrchestrator {
     };
     groupState.executionHistory.push(persistedExecution);
     groupState.finalExecution = persistedExecution;
+    groupState.complexityHistory.push(complexityResult);
+    groupState.finalComplexity = complexityResult;
 
     return {
       groupState,
       iteration,
       baseRef,
       executionResult: persistedExecution,
+      complexityResult,
+    };
+  }
+
+  async runExecutionComplexityHook({ groupState, iteration, executionResult }) {
+    const artifact = await this.complexityHook({
+      repoRoot: this.repoRoot,
+      groupId: groupState.workerGroup.group_id,
+      iteration,
+      changedFiles: executionResult.artifact.changed_files,
+      proposalPath: executionResult.stageExecution.proposal.path,
+      clock: this.clock,
+    });
+    const ref = await this.artifactStore.writeComplexityReport(
+      groupState.workerGroup.group_id,
+      iteration,
+      artifact,
+    );
+    await this.artifactStore.appendLog(
+      `complexity ${artifact.status} for ${groupState.workerGroup.group_id} iteration ${iteration}: readability ${artifact.readability_conclusion}, complexity ${artifact.complexity_conclusion}`,
+    );
+
+    return {
+      artifact,
+      ref,
     };
   }
 
@@ -809,6 +956,7 @@ export class PipelineOrchestrator {
     const validationResult = await this.runValidationStage({
       workerGroup: groupState.workerGroup,
       executionResult: executionRun.executionResult,
+      complexityResult: executionRun.complexityResult,
       mergeReport: mergeOutcome.report,
       iteration: executionRun.iteration,
     });
@@ -819,6 +967,15 @@ export class PipelineOrchestrator {
       await this.artifactStore.appendLog(
         `validation ${validationResult.artifact.status} for ${groupState.workerGroup.group_id} iteration ${executionRun.iteration}`,
       );
+      await this.emitPetEvent({
+        state: "failed",
+        reason: `Validation ${validationResult.artifact.status} for ${groupState.workerGroup.group_id} iteration ${executionRun.iteration}.`,
+        scope: petScopeForStage("validation", {
+          workerGroup: groupState.workerGroup,
+          iteration: executionRun.iteration,
+        }),
+        durationMs: 3000,
+      });
       return;
     }
 
@@ -827,6 +984,7 @@ export class PipelineOrchestrator {
       architecture,
       workerGroup: groupState.workerGroup,
       executionResult: executionRun.executionResult,
+      complexityResult: executionRun.complexityResult,
       mergeReport: mergeOutcome.report,
       validationReport: validationResult.artifact,
       iteration: executionRun.iteration,
@@ -834,6 +992,18 @@ export class PipelineOrchestrator {
     groupState.reviewFeedbackHistory.push(reviewResult.feedback);
     groupState.finalReviewFeedback = reviewResult.feedback;
     groupState.reviewerArtifacts = reviewResult.reviewerArtifacts;
+
+    if (!hasReviewPass(groupState)) {
+      await this.emitPetEvent({
+        state: "failed",
+        reason: `Review failed for ${groupState.workerGroup.group_id} iteration ${executionRun.iteration}.`,
+        scope: petScopeForStage("review", {
+          workerGroup: groupState.workerGroup,
+          iteration: executionRun.iteration,
+        }),
+        durationMs: 3000,
+      });
+    }
   }
 
   async resolveConflictResolutionEntry(conflictResolution) {
@@ -928,11 +1098,14 @@ export class PipelineOrchestrator {
     }
 
     groupState.finalMerge = resolvedMergeEntry;
+    const complexityEntry = findComplexityForIteration(groupState, mergeReport.iteration);
+    groupState.finalComplexity = complexityEntry ?? groupState.finalComplexity;
     let validationEntry = findValidationForIteration(groupState, mergeReport.iteration);
     if (!validationEntry) {
       validationEntry = await this.runValidationStage({
         workerGroup: groupState.workerGroup,
         executionResult: executionEntry,
+        complexityResult: complexityEntry,
         mergeReport: resolvedMergeEntry.artifact,
         iteration: mergeReport.iteration,
         conflictResolution: conflictResolution.artifact,
@@ -945,6 +1118,15 @@ export class PipelineOrchestrator {
       await this.artifactStore.appendLog(
         `validation ${validationEntry.artifact.status} for ${groupState.workerGroup.group_id} iteration ${mergeReport.iteration}`,
       );
+      await this.emitPetEvent({
+        state: "failed",
+        reason: `Validation ${validationEntry.artifact.status} after conflict resolution for ${groupState.workerGroup.group_id}.`,
+        scope: petScopeForStage("validation", {
+          workerGroup: groupState.workerGroup,
+          iteration: mergeReport.iteration,
+        }),
+        durationMs: 3000,
+      });
       return;
     }
 
@@ -953,6 +1135,7 @@ export class PipelineOrchestrator {
       architecture,
       workerGroup: groupState.workerGroup,
       executionResult: executionEntry,
+      complexityResult: complexityEntry,
       mergeReport: resolvedMergeEntry.artifact,
       validationReport: validationEntry.artifact,
       iteration: mergeReport.iteration,
@@ -961,6 +1144,18 @@ export class PipelineOrchestrator {
     groupState.reviewFeedbackHistory.push(reviewResult.feedback);
     groupState.finalReviewFeedback = reviewResult.feedback;
     groupState.reviewerArtifacts = reviewResult.reviewerArtifacts;
+
+    if (!hasReviewPass(groupState)) {
+      await this.emitPetEvent({
+        state: "failed",
+        reason: `Review failed after conflict resolution for ${groupState.workerGroup.group_id}.`,
+        scope: petScopeForStage("review", {
+          workerGroup: groupState.workerGroup,
+          iteration: mergeReport.iteration,
+        }),
+        durationMs: 3000,
+      });
+    }
   }
 
   async runReviewStage({
@@ -968,6 +1163,7 @@ export class PipelineOrchestrator {
     architecture,
     workerGroup,
     executionResult,
+    complexityResult = null,
     mergeReport,
     validationReport,
     iteration,
@@ -983,6 +1179,7 @@ export class PipelineOrchestrator {
             architecture,
             workerGroup,
             executionReport: executionResult.artifact,
+            complexityReport: complexityResult?.artifact ?? null,
             mergeReport,
             validationReport,
             conflictResolution,
@@ -1034,6 +1231,7 @@ export class PipelineOrchestrator {
   async runValidationStage({
     workerGroup,
     executionResult,
+    complexityResult = null,
     mergeReport,
     iteration,
     conflictResolution = null,
@@ -1043,6 +1241,7 @@ export class PipelineOrchestrator {
       {
         workerGroup,
         executionReport: executionResult.artifact,
+        complexityReport: complexityResult?.artifact ?? null,
         mergeReport,
         conflictResolution,
         iteration,
@@ -1072,12 +1271,14 @@ export class PipelineOrchestrator {
     validationResult,
     mergeResult,
     reviewFeedback,
+    complexityResult = null,
   }) {
     const qaResult = await this.runStage("qa", {
       spec,
       architecture,
       workerGroup,
       executionReport: executionResult.artifact,
+      complexityReport: complexityResult?.artifact ?? null,
       validationReport: validationResult.artifact,
       mergeReport: mergeResult.artifact,
       reviewFeedback: reviewFeedback.artifact,
@@ -1103,11 +1304,12 @@ export class PipelineOrchestrator {
     };
   }
 
-  async runDocStage({ spec, architecture, executionResults }) {
+  async runDocStage({ spec, architecture, executionResults, complexityReports }) {
     const docResult = await this.runStage("doc", {
       spec,
       architecture,
       executionReports: executionResults,
+      complexityReports,
     });
     await this.artifactStore.writeRootArtifact("doc-report", docResult.artifact);
 
@@ -1148,6 +1350,7 @@ export class PipelineOrchestrator {
     executionReports,
     mergeReports,
     validationReports,
+    complexityReports,
     conflictResolutions,
     reviewFeedbacks,
     qaReports,
@@ -1162,6 +1365,7 @@ export class PipelineOrchestrator {
       executionReports,
       mergeReports,
       validationReports,
+      complexityReports,
       conflictResolutions,
       reviewFeedbacks,
       qaReports,
