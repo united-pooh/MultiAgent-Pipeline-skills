@@ -14,6 +14,7 @@ Evaluate the delivered implementation holistically against the original requirem
 - `architecture.json`
 - `dispatch.json`
 - All `execution-report.json` files (one per worker group)
+- All `complexity-report.json` files (one per worker group execution pass)
 - All `merge-report.json` files (one per worker group execution pass)
 - All `validation-report.json` files (one per worker group)
 - All `conflict-resolution.json` files (when any merge conflict required human intervention)
@@ -37,6 +38,8 @@ Are all `must-have` and `should-have` requirements from `spec.json` fully implem
 
 ### 2. Implementation Quality
 Beyond what Review checked per-file, does the combined implementation across all worker groups form a coherent, well-structured whole? Are there integration gaps, inconsistencies between workers' outputs, or emergent issues that per-worker review could not catch?
+
+Use `complexity-report.json` here as a direct input. If any report says readability is `low` or complexity is `high`, decide whether that is justified by the problem shape or whether it lowers implementation quality.
 
 ### 3. Architectural Soundness
 Does the final implementation faithfully follow `architecture.json`? Are there deviations that accumulated across workers or review iterations that individually seemed acceptable but collectively degraded the design?
@@ -77,6 +80,7 @@ When `verdict` is `reject`, choose `restart_from` based on where the root cause 
 
 - This stage is read-only. Do not edit files.
 - Every score must include concrete evidence referencing specific code, tests, docs, or artifacts.
+- The returned JSON must include `readability_conclusion` with exactly `high` or `low`, `complexity_conclusion` with exactly `high` or `low`, and `complexity_summary` explaining the evidence. Do not soften these fields with `medium`, `mixed`, or `unclear`.
 - When previous `final-assessment.json` iterations exist, reference them to verify that prior feedback was addressed.
 - `restart_rationale` must explain both why the chosen restart point is correct and what the restarted stages should do differently.
 - Do not recommend restart for cosmetic or minor issues. Reserve `reject` for genuine quality gaps that affect the deliverable.

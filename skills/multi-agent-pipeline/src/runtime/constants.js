@@ -3,6 +3,15 @@ import path from "node:path";
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 600_000;
 export const DEFAULT_REVIEW_MODE = "EME";
+export const DEFAULT_SUBAGENT_MODEL = "gpt-5.5";
+export const DEFAULT_SUBAGENT_REASONING_EFFORT = "xhigh";
+export const DEFAULT_SUBAGENT_SERVICE_TIER = "priority";
+
+const DEFAULT_SUBAGENT_PROFILE = Object.freeze({
+  model: DEFAULT_SUBAGENT_MODEL,
+  reasoningEffort: DEFAULT_SUBAGENT_REASONING_EFFORT,
+  serviceTier: DEFAULT_SUBAGENT_SERVICE_TIER,
+});
 
 export const PRE_CRITERIA = [
   "Correctness",
@@ -41,60 +50,70 @@ export const ROOT_ARTIFACT_FILES = Object.freeze({
 
 export const DEFAULT_STAGE_PROFILES = Object.freeze({
   spec: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/spec.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "default",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   plan: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/plan.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "default",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   architecture: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/architecture.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "default",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   dispatch: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/dispatch.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "default",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   execution: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/execution.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "worker",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   validation: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/validation.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "worker",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   review: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/review.md",
     referenceFiles: ["references/contracts.md", "references/pre-rubric.md"],
     agentType: "default",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   qa: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/qa.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "worker",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   doc: {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/doc.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "worker",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   "final-assessment": {
+    ...DEFAULT_SUBAGENT_PROFILE,
     promptFile: "agents/final-assessment.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "default",

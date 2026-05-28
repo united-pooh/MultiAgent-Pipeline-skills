@@ -10,8 +10,9 @@ Use these templates as default Codex `spawn_agent` prompt scaffolds. Fill the pl
 - For retries or rework passes, name the triggering artifact and the current iteration.
 - For `Execution` and `Review`, include the Playwright skill path only when real browser validation may be required.
 - For `Spec` and `Plan`, attach the `superpowers` skill and explicitly restrict it to brainstorming/planning discipline.
-- Prefer inherited model and reasoning settings. Do not set `model` unless the user asked for it or a stage has a clear task-specific need.
-- When using `fork_context: true`, omit `agent_type`, `model`, and `reasoning_effort`; put the intended stage role in the prompt text.
+- Use the stage profile's pinned model settings by default: `model: "gpt-5.5"`, `reasoning_effort: "xhigh"`, and `service_tier: "priority"`.
+- The profile field names are camelCase (`reasoningEffort`, `serviceTier`); convert them to the `spawn_agent` snake_case fields when calling the tool.
+- When using `fork_context: true`, omit `agent_type`, `model`, `reasoning_effort`, and `service_tier`; put the intended stage role in the prompt text.
 - When a tool-level role matters, such as `worker`, spawn without a full-history fork and pass the needed context explicitly.
 - Use `wait_agent` with `timeout_ms: 600000` whenever the next pipeline step is blocked on that result.
 
@@ -272,6 +273,8 @@ Follow:
 Inputs:
 - execution-report.json:
 <paste execution-report.json content>
+- complexity-report.json:
+<paste complexity-report.json content>
 - merge-report.json:
 <paste merge-report.json content>
 - Repo root: <repo_root>
@@ -329,6 +332,8 @@ Inputs:
 <paste architecture.json content>
 - execution-report.json:
 <paste execution-report.json content>
+- complexity-report.json:
+<paste complexity-report.json content>
 - merge-report.json:
 <paste merge-report.json content>
 - validation-report.json:
@@ -373,6 +378,8 @@ Inputs:
 <paste architecture.json content>
 - execution-report.json:
 <paste execution-report.json content>
+- complexity-report.json:
+<paste complexity-report.json content>
 - merge-report.json:
 <paste merge-report.json content>
 - validation-report.json:
@@ -436,6 +443,8 @@ Inputs:
 <paste architecture.json content>
 - execution-report.json:
 <paste execution-report.json content>
+- complexity-report.json:
+<paste complexity-report.json content>
 - validation-report.json:
 <paste validation-report.json content>
 - review_feedback.json:
@@ -473,6 +482,8 @@ Inputs:
 <paste architecture.json content>
 - execution-report.json:
 <paste execution-report.json content>
+- complexity-report.json:
+<paste complexity-report.json content>
 - validation-report.json:
 <paste validation-report.json content>
 - review_feedback.json:
@@ -514,6 +525,8 @@ Inputs:
 <paste dispatch.json content>
 - all execution reports:
 <paste execution reports>
+- all complexity reports:
+<paste complexity reports>
 - all merge reports:
 <paste merge reports>
 - all validation reports:
@@ -526,7 +539,7 @@ Inputs:
 <paste doc-report.json content>
 - Repo root: <repo_root>
 
-Evaluate the complete delivered change and choose `accept` or the earliest correct restart point.
+Evaluate the complete delivered change and choose `accept` or the earliest correct restart point. Include definite `readability_conclusion` and `complexity_conclusion` values.
 Return exactly one fenced `json` block with `final-assessment.json` and no extra prose.
 ```
 

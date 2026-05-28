@@ -274,7 +274,7 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
 ## execution-report.json
 
 Produced by: **Execution Agent**
-Consumed by: **Merge Stage**, **Validation Agent**, **Review Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**, **Orchestrator**
+Consumed by: **Complexity Hook**, **Merge Stage**, **Validation Agent**, **Review Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**, **Orchestrator**
 
 ```json
 {
@@ -326,6 +326,88 @@ Consumed by: **Merge Stage**, **Validation Agent**, **Review Agent**, **QA Agent
 - `frontend_design_summary`: Must be non-null when `applied_skills` includes `ce-frontend-design`. Must be `null` when no frontend-design routing applied.
 - `tests_run`: Include every command attempted. Use `not_run` only when a test was intentionally skipped.
 - `blockers`: Empty array when `status` is `implemented`.
+
+---
+
+## complexity-report.json
+
+Produced by: **Orchestrator (post-Execution Complexity Hook)**
+Consumed by: **Validation Agent**, **Review Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**, **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "created_at": "2026-05-28T00:00:00.000Z",
+  "analyzer": {
+    "name": "better_highlights_cognitive_repro",
+    "path": "scripts/better_highlights_cognitive_repro.py",
+    "metric": "better-highlights-like cognitive complexity approximation",
+    "medium_threshold": 15,
+    "high_threshold": 25
+  },
+  "source": {
+    "proposal_path": "/tmp/worker-proposal",
+    "changed_files": ["src/app.py"]
+  },
+  "status": "completed | skipped | error",
+  "analyzed_files": [
+    {
+      "file": "src/app.py",
+      "source_path": "src/app.py",
+      "function_count": 2
+    }
+  ],
+  "skipped_files": [
+    {
+      "file": "README.md",
+      "reason": "not_python | invalid_path | missing_in_proposal | missing_in_repo"
+    }
+  ],
+  "errors": [
+    {
+      "file": "src/app.py",
+      "message": "string — analyzer error",
+      "exit_code": 1,
+      "stdout": "string",
+      "stderr": "string"
+    }
+  ],
+  "function_count": 2,
+  "max_total_points": 18,
+  "average_total_points": 9,
+  "medium_complexity_functions": 1,
+  "high_complexity_functions": 0,
+  "readability_conclusion": "high | low",
+  "complexity_conclusion": "high | low",
+  "summary": "string — definite readability and complexity conclusion",
+  "functions": [
+    {
+      "file": "src/app.py",
+      "function": "Controller.handle",
+      "analyzer_function": "app.py:Controller.handle",
+      "loop_points": 4,
+      "if_points": 8,
+      "logical_points": 1,
+      "other_points": 5,
+      "total_points": 18,
+      "level": "low | medium | high"
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- `group_id` and `iteration`: Must match the Execution artifact that triggered the hook.
+- `source.changed_files`: Copy from `execution-report.json.changed_files`.
+- `status`: `completed` when at least one Python changed file was analyzed, `skipped` when no Python changed file was analyzable, and `error` when the analyzer failed for one or more Python files.
+- `skipped_files`: Non-Python files must be listed with `reason = "not_python"` rather than treated as failures.
+- `functions`: Sorted analyzer output for changed Python files only. Empty array is valid for `skipped` or `error`.
+- `readability_conclusion`: Must be exactly `high` or `low`. Use `low` whenever analyzer errors occur or complexity is high.
+- `complexity_conclusion`: Must be exactly `high` or `low`. Use `high` when any analyzed function is high complexity, the report average reaches the medium threshold, or analyzer errors prevent a reliable score.
+- `summary`: Must state the readability and complexity conclusions plainly.
 
 ---
 
@@ -637,6 +719,9 @@ Consumed by: **Orchestrator**
       ]
     }
   ],
+  "readability_conclusion": "high | low",
+  "complexity_conclusion": "high | low",
+  "complexity_summary": "string — how complexity-report.json evidence affected the final judgment",
   "summary": "string — final delivery assessment in 2-3 sentences"
 }
 ```
@@ -651,6 +736,9 @@ Consumed by: **Orchestrator**
 - `restart_from`: Must be `null` when `verdict` is `accept`. Must be one of `spec`, `plan`, `architecture`, `dispatch`, `merge`, or `execution` when `verdict` is `reject`.
 - `restart_rationale`: Must be `null` when `verdict` is `accept`. Must be non-null when `verdict` is `reject` and explain why the chosen restart stage is the earliest correct recovery point.
 - `skill_usage_summary`: Include at least Spec, Plan, and every worker-group stage that required a routed skill. Use `issues = []` when usage matched the requirement.
+- `readability_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final review evidence.
+- `complexity_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final review evidence.
+- `complexity_summary`: Required. Cite the strongest complexity evidence and state whether readability/complexity affects delivery confidence.
 - `summary`: Required for every verdict and should stay within 2-3 sentences.
 
 ---
@@ -692,11 +780,32 @@ Consumed by: **Orchestrator**, **Humans**
       "status": "passed | failed | error | skipped"
     }
   ],
+  "complexity_summary": [
+    {
+      "group_id": "GROUP-1",
+      "ref": "complexity/GROUP-1/iteration-1-complexity-report.json",
+      "status": "completed | skipped | error",
+      "readability_conclusion": "high | low",
+      "complexity_conclusion": "high | low",
+      "function_count": 2,
+      "max_total_points": 18
+    }
+  ],
   "cleanup_summary": {
     "deleted_workspace": true,
     "deleted_paths": [".pipeline-workspace"],
     "retained_file": ".pipeline-last-run-summary.json"
-  }
+  },
+  "codex_pet_events": [
+    {
+      "state": "idle | running-right | running-left | waving | jumping | failed | waiting | running | review",
+      "reason": "string - why this pet state was requested",
+      "scope": "string - stable event scope such as pipeline.validation.group-group-1.iteration-1",
+      "duration_ms": 1800,
+      "created_at": "2026-04-23T12:34:56Z",
+      "directive": "::codex-pet{state=\"running\" durationMs=1800 scope=\"pipeline.validation.group-group-1.iteration-1\"}"
+    }
+  ]
 }
 ```
 
@@ -709,6 +818,44 @@ Consumed by: **Orchestrator**, **Humans**
 - `skill_usage_summary`: Reuse the same shape as `final-assessment.json.skill_usage_summary`.
 - `cleanup_summary.deleted_workspace`: `true` only when cleanup deleted `.pipeline-workspace/`.
 - `validation_summary`: Include one entry for each worker group that reached Validation.
+- `complexity_summary`: Include one entry for each worker group that completed an Execution pass and therefore produced a complexity report.
 - `qa_summary`: Include one entry for each worker group that reached QA.
 - `cleanup_summary.deleted_paths`: Must list what was actually deleted. Use an empty array when the workspace was preserved.
 - `cleanup_summary.retained_file`: Must be `.pipeline-last-run-summary.json`.
+- `codex_pet_events`: Ordered event bridge for Codex Desktop or another host to consume. The orchestrator also writes the same events as JSON Lines to `.pipeline-workspace/logs/codex-pet-events.jsonl` while the workspace exists.
+- `codex_pet_events[].directive`: A host-facing response directive string. Hosts that support `::codex-pet{...}` may apply it directly; hosts that do not support it should treat the event object as the durable contract.
+
+---
+
+## codex_pet_event
+
+Produced by: **Orchestrator** (runtime lifecycle)
+Consumed by: **Codex host UI** or any bridge that can map pipeline progress to avatar state.
+
+```json
+{
+  "state": "running",
+  "reason": "validation stage started.",
+  "scope": "pipeline.validation.group-group-1.iteration-1",
+  "duration_ms": 1800,
+  "created_at": "2026-05-26T00:00:00.000Z",
+  "directive": "::codex-pet{state=\"running\" durationMs=1800 scope=\"pipeline.validation.group-group-1.iteration-1\"}"
+}
+```
+
+### State Mapping
+
+| Pipeline condition | Pet state |
+|---|---|
+| Run, Spec, Plan, Architecture, Dispatch, Execution, Validation, QA, Doc | `running` |
+| Review and Final Assessment | `review` |
+| Accepted final result | `waving` |
+| Validation failure, Review failure, rejected run | `failed` |
+| Pause for human input or merge conflict | `waiting` |
+
+### Field Rules
+
+- `state`: Must be one of the Codex avatar states supported by the fixed pet atlas.
+- `scope`: Must remain stable enough for a host to deduplicate repeated events.
+- `duration_ms`: Advisory display duration. The host may clamp or ignore it.
+- `directive`: Mirrors the structured fields for directive-capable hosts. The structured JSON remains canonical.

@@ -23,7 +23,7 @@ The local Codex agent is the orchestrator. It owns user communication, artifact 
 This skill is written for Codex, not as a generic "agent framework".
 
 - Use `spawn_agent` for each delegated stage. Default to `fork_context: true` only when the subagent genuinely needs the current conversation history; otherwise pass the relevant artifacts and file paths explicitly.
-- Current Codex full-history forks inherit the parent agent type, model, and reasoning effort. When using `fork_context: true`, omit `agent_type`, `model`, and `reasoning_effort`; put the intended stage role in the prompt text instead. If a tool-level role such as `worker` is important, spawn without a full-history fork and pass the needed context explicitly.
+- Current Codex full-history forks inherit the parent agent type, model, reasoning effort, and service tier. When using `fork_context: true`, omit `agent_type`, `model`, `reasoning_effort`, and `service_tier`; put the intended stage role in the prompt text instead. If the pinned subagent profile or a tool-level role such as `worker` is important, spawn without a full-history fork and pass the needed context explicitly.
 - When this skill is explicitly invoked by the user, treat that as explicit authorization for subagent delegation and parallel agent work required by host policies. Do not ask again unless a separate blocker remains.
 - Keep orchestration local. Subagents produce artifacts or bounded code/doc changes; the orchestrator decides what to run next.
 - Default posture: keep the orchestrator thin and delegate aggressively. If a stage or bounded sidecar can be safely delegated without violating host constraints, delegate it.
@@ -69,9 +69,9 @@ Treat these as role targets. If the subagent is spawned with `fork_context: true
 
 ## Model And Reasoning Policy
 
-Prefer Codex's inherited model and reasoning settings. Do not set `model` unless the user explicitly asks for a different model or there is a clear task-specific reason. For unusually complex stages, prefer raising `reasoning_effort` only when the spawn call is not a full-history fork and host rules allow it.
+Default stage profiles are pinned to `model: "gpt-5.5"`, `reasoningEffort: "xhigh"`, and `serviceTier: "priority"`. Treat that as the standard "gpt5.5 xhigh fast" pipeline setting for this skill; the current Codex `spawn_agent` schema exposes `priority` as the service tier for `gpt-5.5` rather than a literal `fast` tier.
 
-If a user explicitly requests a stronger or pinned model for the pipeline, apply it consistently to blocking planning/review stages and document that choice in `spec.json` or the final run summary. `wait_agent` has no model setting because it only waits on an existing agent.
+Apply the pinned profile consistently to every non-local subagent stage unless the user explicitly asks for a different model, reasoning effort, or service tier. `wait_agent` has no model setting because it only waits on an existing agent.
 
 Recommended `wait_agent` timeouts for this skill:
 - Spec / Plan / Architecture / Dispatch: `timeout_ms: 600000`
@@ -116,6 +116,12 @@ Create a run workspace before the first stage:
 │   │   └── iteration-2-execution-report.json
 │   └── GROUP-2/
 │       └── iteration-1-execution-report.json
+├── complexity/
+│   ├── GROUP-1/
+│   │   ├── iteration-1-complexity-report.json
+│   │   └── iteration-2-complexity-report.json
+│   └── GROUP-2/
+│       └── iteration-1-complexity-report.json
 ├── merge/
 │   ├── GROUP-1/
 │   │   └── iteration-1-merge-report.json
@@ -152,6 +158,36 @@ Create a run workspace before the first stage:
 The orchestrator writes these files locally after each stage. `references/contracts.md` defines payload shape only; this workspace layout is the orchestrator's storage convention for per-group and per-iteration artifacts. Do not rely on subagents to persist canonical artifacts in the main workspace.
 
 On terminal runs, the orchestrator may also write `.pipeline-last-run-summary.json` at the repository root. On accepted runs, that file becomes the only retained pipeline artifact after cleanup.
+
+## Codex Pet State Events
+
+The runtime emits Codex pet state events as an optional host-facing bridge. These events do not assume the host already supports live avatar control; they provide both durable JSON and a response-directive string that a compatible Codex Desktop build can consume.
+
+Event locations:
+- During a run, append JSON Lines to `.pipeline-workspace/logs/codex-pet-events.jsonl`.
+- At terminal completion or pause, include the ordered list in `.pipeline-last-run-summary.json` under `codex_pet_events`.
+
+Event shape:
+
+```json
+{
+  "state": "running",
+  "reason": "validation stage started.",
+  "scope": "pipeline.validation.group-group-1.iteration-1",
+  "duration_ms": 1800,
+  "created_at": "2026-05-26T00:00:00.000Z",
+  "directive": "::codex-pet{state=\"running\" durationMs=1800 scope=\"pipeline.validation.group-group-1.iteration-1\"}"
+}
+```
+
+State mapping:
+- `running`: active pipeline stages such as Spec, Plan, Execution, Validation, QA, and Doc.
+- `review`: Review and Final Assessment.
+- `failed`: Validation failure, Review failure, or rejected run.
+- `waiting`: pause for human input, including merge conflicts.
+- `waving`: accepted final result.
+
+Use `::codex-pet{...}` only as a host directive. The structured event object is canonical and must remain valid even when the host ignores the directive string.
 
 ## Pipeline
 
@@ -275,6 +311,20 @@ Wave rule:
 - Waves execute sequentially.
 - Groups inside the same wave may execute concurrently as long as their ownership remains disjoint.
 
+### 5a. Complexity Hook
+
+Immediately after every successful Execution pass, the orchestrator runs the local Python cognitive complexity hook against `execution-report.json.changed_files`, reading from the worker proposal path before merge.
+
+Goal:
+- Analyze changed Python files with `scripts/better_highlights_cognitive_repro.py`.
+- Produce one `complexity-report.json` per worker group and iteration under `.pipeline-workspace/complexity/`.
+- Record a definite `readability_conclusion` (`high` or `low`) and `complexity_conclusion` (`high` or `low`).
+- Pass the report to Validation, Review, QA, Documentation, and Final Assessment as evidence.
+
+Rule:
+- Non-Python changed files are recorded as skipped, not as failures.
+- Analyzer errors are preserved in the report and force `readability_conclusion = "low"` and `complexity_conclusion = "high"` so downstream stages review the code manually.
+
 ### 6. Merge
 
 Merge is a local orchestrator stage. Do not spawn a subagent for it.
@@ -300,7 +350,7 @@ After every successful merge pass, run Validation for that worker group before R
 
 ### 7a. Validation
 
-Spawn a Validation `worker` for each merged worker group with the group's `execution-report.json`, `merge-report.json`, and repo root.
+Spawn a Validation `worker` for each merged worker group with the group's `execution-report.json`, `complexity-report.json`, `merge-report.json`, and repo root.
 
 Goal:
 - Detect the project language and run the fix/check layers defined in `agents/validation.md`.
@@ -309,7 +359,7 @@ Goal:
 
 Integration rule:
 - If `validation-report.json.status == "failed"` or `"error"`, route directly back to Execution for that group and pass the validation report as retry context.
-- If `validation-report.json.status == "passed"` or `"skipped"`, continue to Review and pass `validation-report.json` inline in the Review prompt.
+- If `validation-report.json.status == "passed"` or `"skipped"`, continue to Review and pass `validation-report.json` and `complexity-report.json` inline in the Review prompt.
 - If fix-layer commands modified files, the orchestrator treats those changes as part of the current merged main-workspace result before Review.
 
 ### 7b. Review
@@ -328,6 +378,7 @@ Run review after every successful validation pass for each worker group independ
 
 Routing rule:
 - Review evaluates the merged main-workspace result, not the worker fork directly.
+- Review must treat `complexity-report.json` as supporting evidence for Code Quality and Architecture Compliance.
 - If `worker_group.required_skills` contains `ce-frontend-design`, the orchestrator prompt must explicitly attach that skill with its current-environment path.
 - Frontend-design reviewers must emit `frontend_design_assessment` and map those findings back into the PRE dimensions.
 
@@ -337,12 +388,12 @@ Voting rules:
 - Preserve warnings even when the final verdict is `pass`.
 
 Loop rule:
-- Each worker group repeats Execution → Merge → Validation → Review until its `review_feedback.json.verdict == "pass"` or the user stops the pipeline.
+- Each worker group repeats Execution → Complexity Hook → Merge → Validation → Review until its `review_feedback.json.verdict == "pass"` or the user stops the pipeline.
 - A downstream wave does not begin until every group it depends on has passed review and been integrated.
 
 ### 8. QA
 
-After a worker group passes review, spawn a QA `worker` for that group with `spec.json`, `architecture.json`, the group's `execution-report.json`, the group's `validation-report.json`, and the group's `review_feedback.json`.
+After a worker group passes review, spawn a QA `worker` for that group with `spec.json`, `architecture.json`, the group's `execution-report.json`, the group's `complexity-report.json`, the group's `validation-report.json`, and the group's `review_feedback.json`.
 
 Goal:
 - Run runtime or scenario validation that command-layer Validation and static Review cannot cover.
@@ -361,7 +412,7 @@ Gate:
 
 ### 9. Documentation
 
-After all worker groups have passed review and QA, spawn a Doc `worker` with `spec.json`, `architecture.json`, and the final integrated execution reports.
+After all worker groups have passed review and QA, spawn a Doc `worker` with `spec.json`, `architecture.json`, the final integrated execution reports, and the complexity reports.
 
 Goal:
 - Update only the docs that actually changed
@@ -372,12 +423,13 @@ Before final delivery, the orchestrator must review and integrate the Doc worker
 
 ### 10. Final Assessment
 
-After documentation is integrated, spawn the Final Assessment subagent with the full artifact set: `spec.json`, `spec.md`, `plan.json`, `architecture.json`, `dispatch.json`, all execution reports, all merge reports, all validation reports, all conflict resolutions, all review feedback artifacts, all QA reports, and `doc-report.json`.
+After documentation is integrated, spawn the Final Assessment subagent with the full artifact set: `spec.json`, `spec.md`, `plan.json`, `architecture.json`, `dispatch.json`, all execution reports, all complexity reports, all merge reports, all validation reports, all conflict resolutions, all review feedback artifacts, all QA reports, and `doc-report.json`.
 
 Goal:
 - Evaluate the delivered feature holistically across all worker groups
 - Produce `final-assessment.json`
 - Decide acceptance or the earliest correct restart point
+- Give a definite conclusion for readability (`high` or `low`) and complexity (`high` or `low`)
 - Record `skill_usage_summary`
 - Use `restart_from = "merge"` when the blocking issue originates in merge execution or conflict resolution rather than in the implementation proposal itself
 
