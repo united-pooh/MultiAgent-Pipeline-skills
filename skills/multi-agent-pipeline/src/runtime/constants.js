@@ -13,6 +13,97 @@ const DEFAULT_SUBAGENT_PROFILE = Object.freeze({
   serviceTier: DEFAULT_SUBAGENT_SERVICE_TIER,
 });
 
+const STAGE_FILES = Object.freeze({
+  spec: {
+    promptFile: "agents/spec.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  plan: {
+    promptFile: "agents/plan.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  architecture: {
+    promptFile: "agents/architecture.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  dispatch: {
+    promptFile: "agents/dispatch.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  execution: {
+    promptFile: "agents/execution.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  validation: {
+    promptFile: "agents/validation.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  review: {
+    promptFile: "agents/review.md",
+    referenceFiles: ["references/contracts.md", "references/pre-rubric.md"],
+  },
+  qa: {
+    promptFile: "agents/qa.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  doc: {
+    promptFile: "agents/doc.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+  "final-assessment": {
+    promptFile: "agents/final-assessment.md",
+    referenceFiles: ["references/contracts.md"],
+  },
+});
+
+const CODEX_STAGE_AGENT_TYPES = Object.freeze({
+  spec: "default",
+  plan: "default",
+  architecture: "default",
+  dispatch: "default",
+  execution: "worker",
+  validation: "worker",
+  review: "default",
+  qa: "worker",
+  doc: "worker",
+  "final-assessment": "default",
+});
+
+function buildCodexStageProfiles() {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(STAGE_FILES).map(([stage, files]) => [
+        stage,
+        {
+          ...DEFAULT_SUBAGENT_PROFILE,
+          ...files,
+          agentType: CODEX_STAGE_AGENT_TYPES[stage],
+          waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+        },
+      ]),
+    ),
+  );
+}
+
+function buildOpenCodeExpertStageProfiles() {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.entries(STAGE_FILES).map(([stage, files]) => [
+        stage,
+        {
+          host: "opencode",
+          primaryAgent: "multi-agent-pipeline-expert",
+          invocation: "task",
+          agentMode: "subagent",
+          reasoningEffort: "high",
+          ...files,
+          waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+        },
+      ]),
+    ),
+  );
+}
+
 export const PRE_CRITERIA = [
   "Correctness",
   "Security",
@@ -48,78 +139,9 @@ export const ROOT_ARTIFACT_FILES = Object.freeze({
   "final-assessment": "final-assessment.json",
 });
 
-export const DEFAULT_STAGE_PROFILES = Object.freeze({
-  spec: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/spec.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "default",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  plan: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/plan.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "default",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  architecture: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/architecture.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "default",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  dispatch: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/dispatch.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "default",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  execution: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/execution.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "worker",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  validation: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/validation.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "worker",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  review: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/review.md",
-    referenceFiles: ["references/contracts.md", "references/pre-rubric.md"],
-    agentType: "default",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  qa: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/qa.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "worker",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  doc: {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/doc.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "worker",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-  "final-assessment": {
-    ...DEFAULT_SUBAGENT_PROFILE,
-    promptFile: "agents/final-assessment.md",
-    referenceFiles: ["references/contracts.md"],
-    agentType: "default",
-    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
-  },
-});
+export const DEFAULT_CODEX_STAGE_PROFILES = buildCodexStageProfiles();
+export const DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES = buildOpenCodeExpertStageProfiles();
+export const DEFAULT_STAGE_PROFILES = DEFAULT_CODEX_STAGE_PROFILES;
 
 export const TEXT_EXTENSIONS = new Set([
   ".c",

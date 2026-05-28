@@ -1,6 +1,6 @@
 # Orchestrator Prompt Templates
 
-Use these templates as default Codex `spawn_agent` prompt scaffolds. Fill the placeholders, delete irrelevant lines, and keep the final prompt short. Do not restate the entire skill; point the subagent at the stage prompt and contract files it must follow.
+Use these templates as default host-specific stage prompt scaffolds. Fill the placeholders, delete irrelevant lines, and keep the final prompt short. Do not restate the entire skill; point the subagent at the stage prompt and contract files it must follow.
 
 ## Global Rules
 
@@ -10,11 +10,33 @@ Use these templates as default Codex `spawn_agent` prompt scaffolds. Fill the pl
 - For retries or rework passes, name the triggering artifact and the current iteration.
 - For `Execution` and `Review`, include the Playwright skill path only when real browser validation may be required.
 - For `Spec` and `Plan`, attach the `superpowers` skill and explicitly restrict it to brainstorming/planning discipline.
+- Select the host adapter first. Codex and OpenCode use the same stage prompts and contracts but different tool schemas.
+
+## Codex Adapter
+
+Use this adapter in Codex Desktop or Codex CLI.
+
+- Use `spawn_agent` for delegated stages and `wait_agent` for blocking waits.
 - Use the stage profile's pinned model settings by default: `model: "gpt-5.5"`, `reasoning_effort: "xhigh"`, and `service_tier: "priority"`.
 - The profile field names are camelCase (`reasoningEffort`, `serviceTier`); convert them to the `spawn_agent` snake_case fields when calling the tool.
 - When using `fork_context: true`, omit `agent_type`, `model`, `reasoning_effort`, and `service_tier`; put the intended stage role in the prompt text.
 - When a tool-level role matters, such as `worker`, spawn without a full-history fork and pass the needed context explicitly.
 - Use `wait_agent` with `timeout_ms: 600000` whenever the next pipeline step is blocked on that result.
+- `DEFAULT_CODEX_STAGE_PROFILES` in `src/runtime/constants.js` is the runtime default.
+
+## OpenCode Expert Adapter
+
+Use this adapter from the custom primary agent documented in
+`references/opencode-expert-mode.md` and `templates/opencode-expert-agent.md`.
+
+- OpenCode does not use Codex's `spawn_agent` schema. Do not pass Codex-only fields such as `agent_type`, `service_tier`, or `fork_context`.
+- Invoke stage workers through OpenCode's Task/subagent mechanism when host permissions allow it.
+- Keep the expert agent as the primary orchestrator; subagents produce bounded artifacts or proposals.
+- Configure `permission.skill` so `multi-agent-pipeline` can load through the native `skill` tool.
+- Configure `permission.task` so the expert agent can call the intended subagents.
+- Translate the current stage profile from `DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES` into the local OpenCode agent/task call shape.
+- If the active OpenCode setup cannot provide safe subagent delegation, preserve the stage order locally and record the limitation in the run summary.
+- Continue to read only the current stage prompt plus required references; do not paste the whole skill into a subagent prompt.
 
 ## Brainstorming
 
@@ -39,7 +61,7 @@ Write the approved or user-implied design to `.pipeline-workspace/design.md`:
 ## Spec
 
 ```text
-You are the Spec stage for a Codex multi-agent pipeline.
+You are the Spec stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/spec.md
@@ -78,7 +100,7 @@ Return exactly two fenced blocks and no extra prose:
 Use when the user requests changes to spec.md after reviewing it.
 
 ```text
-You are the Spec stage (retry, iteration <n>) for a Codex multi-agent pipeline.
+You are the Spec stage (retry, iteration <n>) for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/spec.md
@@ -108,7 +130,7 @@ Return exactly two fenced blocks and no extra prose:
 ## Plan
 
 ```text
-You are the Plan stage for a Codex multi-agent pipeline.
+You are the Plan stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/plan.md
@@ -139,7 +161,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## Architecture
 
 ```text
-You are the Architecture stage for a Codex multi-agent pipeline.
+You are the Architecture stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/architecture.md
@@ -169,7 +191,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## Dispatch
 
 ```text
-You are the Dispatch stage for a Codex multi-agent pipeline.
+You are the Dispatch stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/dispatch.md
@@ -201,7 +223,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## Architecture Rework
 
 ```text
-You are the Architecture rework stage for a Codex multi-agent pipeline.
+You are the Architecture rework stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/architecture.md
@@ -226,7 +248,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## Execution
 
 ```text
-You are the Execution stage for a Codex multi-agent pipeline.
+You are the Execution stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/execution.md
@@ -264,7 +286,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## Validation
 
 ```text
-You are the Validation stage for a Codex multi-agent pipeline.
+You are the Validation stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/validation.md
@@ -297,7 +319,7 @@ Return exactly one fenced `json` block with `validation-report.json` and no extr
 ## Execution Sync Pass
 
 ```text
-You are the Execution stage for a Codex multi-agent pipeline.
+You are the Execution stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/execution.md
@@ -316,7 +338,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## Review PRE
 
 ```text
-You are reviewer <reviewer_id> for a Codex multi-agent pipeline in PRE mode.
+You are reviewer <reviewer_id> for a multi-agent pipeline in PRE mode.
 
 Follow:
 - <skill>/agents/review.md
@@ -362,7 +384,7 @@ Do not return extra prose.
 Spawn all 3 reviewers before waiting on them.
 
 ```text
-You are reviewer <reviewer_id> for a Codex multi-agent pipeline in EME mode.
+You are reviewer <reviewer_id> for a multi-agent pipeline in EME mode.
 
 Follow:
 - <skill>/agents/review.md
@@ -407,7 +429,7 @@ Return exactly one fenced `json` block with `review_individual_N.json` and no ex
 ## Plan Rework
 
 ```text
-You are the Plan rework stage for a Codex multi-agent pipeline.
+You are the Plan rework stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/plan.md
@@ -430,7 +452,7 @@ Return exactly one fenced `json` block and no extra prose.
 ## QA
 
 ```text
-You are the QA stage for a Codex multi-agent pipeline.
+You are the QA stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/qa.md
@@ -469,7 +491,7 @@ Return exactly one fenced `json` block with `qa-report.json` and no extra prose.
 ## Doc
 
 ```text
-You are the Doc stage for a Codex multi-agent pipeline.
+You are the Doc stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/doc.md
@@ -508,7 +530,7 @@ Return exactly one fenced `json` block with `doc-report.json` and no extra prose
 ## Final Assessment
 
 ```text
-You are the Final Assessment stage for a Codex multi-agent pipeline.
+You are the Final Assessment stage for a multi-agent pipeline.
 
 Follow:
 - <skill>/agents/final-assessment.md

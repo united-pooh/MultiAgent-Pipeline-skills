@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import {
   ArtifactStore,
   CODEX_PET_STATES,
+  DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES,
   MergeEngine,
   PipelineOrchestrator,
   aggregateReviewFeedback,
@@ -604,6 +605,81 @@ test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => 
     assert.equal(profile.model, "gpt-5.5", `reviewer-${reviewerId}`);
     assert.equal(profile.reasoningEffort, "xhigh", `reviewer-${reviewerId}`);
     assert.equal(profile.serviceTier, "priority", `reviewer-${reviewerId}`);
+  }
+});
+
+test("OpenCode expert profiles use task invocation without Codex-only spawn fields", async () => {
+  const catalog = loadStageCatalog(fixtureSourceRoot, {
+    stageProfiles: DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES,
+  });
+  const stages = [
+    "spec",
+    "plan",
+    "architecture",
+    "dispatch",
+    "execution",
+    "validation",
+    "review",
+    "qa",
+    "doc",
+    "final-assessment",
+  ];
+
+  for (const stage of stages) {
+    const profile = catalog.resolveStageProfile(stage);
+    assert.equal(profile.host, "opencode", stage);
+    assert.equal(profile.primaryAgent, "multi-agent-pipeline-expert", stage);
+    assert.equal(profile.invocation, "task", stage);
+    assert.equal(profile.agentMode, "subagent", stage);
+    assert.equal(profile.reasoningEffort, "high", stage);
+    assert.equal(profile.waitTimeoutMs, 600_000, stage);
+    assert.equal(profile.agentType, undefined, stage);
+    assert.equal(profile.serviceTier, undefined, stage);
+    assert.equal(profile.forkContext, undefined, stage);
+    assert.ok(profile.promptFile.startsWith("agents/"), stage);
+  }
+});
+
+test("skill entrypoint is OpenCode-compatible and progressively disclosed", async () => {
+  const skillPath = path.resolve(fixtureSourceRoot, "SKILL.md");
+  const skillText = await fs.readFile(skillPath, "utf8");
+  const lineCount = skillText.trimEnd().split("\n").length;
+  const frontmatterMatch = /^---\n([\s\S]*?)\n---\n/.exec(skillText);
+
+  assert.ok(frontmatterMatch, "SKILL.md should start with YAML frontmatter");
+  assert.ok(lineCount <= 220, `SKILL.md should stay lightweight, found ${lineCount} lines`);
+
+  const frontmatter = frontmatterMatch[1];
+  const descriptionMatch = /description:\s*>\n([\s\S]*?)\ncompatibility:/m.exec(frontmatter);
+  assert.match(frontmatter, /^name: multi-agent-pipeline$/m);
+  assert.match(frontmatter, /^compatibility: .*opencode/m);
+  assert.ok(descriptionMatch, "description should use folded YAML text");
+
+  const description = descriptionMatch[1]
+    .split("\n")
+    .map((line) => line.trim())
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+  assert.ok(description.length >= 1, "description should not be empty");
+  assert.ok(description.length <= 1024, "OpenCode description limit is 1024 characters");
+
+  const referencedFiles = [
+    "references/codex-execution-model.md",
+    "references/opencode-expert-mode.md",
+    "references/pipeline-stages.md",
+    "references/workspace-and-events.md",
+    "references/orchestration-rules.md",
+    "references/contracts.md",
+    "references/pre-rubric.md",
+    "references/orchestrator-prompts.md",
+    "references/example-run.md",
+    "templates/opencode-expert-agent.md",
+  ];
+
+  for (const relativePath of referencedFiles) {
+    assert.match(skillText, new RegExp(relativePath.replaceAll(".", "\\.")));
+    await fs.access(path.resolve(fixtureSourceRoot, relativePath));
   }
 });
 
