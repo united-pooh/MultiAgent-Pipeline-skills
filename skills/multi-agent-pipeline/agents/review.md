@@ -11,11 +11,13 @@ Perform a strict Pointwise Rubric Evaluation and return one `review_individual_N
 - `spec.json`
 - `architecture.json`
 - `execution-report.json`
-- The current codebase with the latest changes applied
+- `complexity-report.json` — post-Execution analyzer report for changed Python files
+- `merge-report.json`
+- `validation-report.json` — objective command output for the merged result
+- The current codebase with the merged main-workspace result applied
 - `references/contracts.md`
 - `references/pre-rubric.md`
 - A reviewer ID from the orchestrator
-- `/Users/united_pooh/.codex/skills/playwright/SKILL.md` when browser automation is required for validation
 
 ## Output
 
@@ -27,25 +29,23 @@ Return exactly one fenced `json` block containing a `review_individual_N.json` p
 - Evaluate independently. Do not assume other reviewers will catch issues.
 - Use evidence with concrete `file:line` references.
 - Be strict on correctness, security, missing tests, and architecture drift.
-- If browser behavior is required to evaluate correctness or regressions, read `/Users/united_pooh/.codex/skills/playwright/SKILL.md` first and follow that skill in a read-only validation mode. Do not edit repo files as part of browser validation.
+- Judge the scoped worker group identified by `execution-report.json` and `merge-report.json`, even if the main workspace also contains other already-merged groups from the same wave.
+- For Correctness and Test Coverage, cite `validation-report.json` command output as evidence. If validation was not provided or did not pass/skip, those dimensions must be at most `warning`.
+- For Code Quality and Architecture Compliance, use `complexity-report.json` as supporting evidence when it is present. A low readability or high complexity conclusion is not automatically a fail, but it must be reconciled with the changed code and cited when relevant.
+- If the orchestrator explicitly attaches `ce-frontend-design`, use it and record it in `applied_skills`.
+- When `ce-frontend-design` is active, produce `frontend_design_assessment` and map any issues back into the PRE dimensions instead of treating them as side notes.
 
 ## Process
 
-1. Read the spec, architecture, and execution report to understand expected scope.
+1. Read the spec, architecture, execution report, complexity report, merge report, and validation report to understand expected scope and the merged result under review.
 2. Inspect every changed file and any nearby callers, tests, or docs needed to judge behavior.
-3. When static inspection is insufficient for a browser-facing behavior, use the Playwright skill to gather read-only evidence and incorporate the result into your review.
-4. Score all 8 PRE dimensions using `references/pre-rubric.md`.
+3. Score all 8 PRE dimensions using `references/pre-rubric.md`.
+4. When `ce-frontend-design` is active, evaluate system fit, interaction quality, UI accessibility, and visual verification evidence. Use those findings as concrete evidence for PRE scoring.
 5. For every `warning` or `fail`, include a concrete fix suggestion.
-6. Set `recommended_next_stage` using this routing rule:
-   - `execution` for implementation mistakes that can be fixed without redesign
-   - `architecture` for architecture-level issues, missing abstractions, or a design that cannot satisfy the spec cleanly
-   - `plan` for planning-level issues such as bad phase decomposition, execution order, or ownership boundaries
-   - `null` when there is no blocking issue and the change should pass
-7. When `recommended_next_stage` is not `null`, explain the top-level routing reason in `rework_reason`.
 
 ## Quality Bar
 
 - A `pass` still needs evidence.
 - A `fail` must identify a real blocking issue, not a stylistic preference.
 - If code deviates from the architecture intentionally but beneficially, mark `warning` and explain the tradeoff.
-- Route upward only when the root cause actually lives above execution. Do not send work back to Architecture or Plan for problems that are only normal implementation defects.
+- When frontend design routing is active, missing focus states, broken visual consistency, or unverified high-impact UI changes are legitimate review findings.
