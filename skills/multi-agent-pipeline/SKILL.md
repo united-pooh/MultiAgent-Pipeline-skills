@@ -3,9 +3,9 @@ name: multi-agent-pipeline
 description: >
   Codex-first multi-agent production pipeline for non-trivial implementation work. Uses
   `spawn_agent` to run Spec, Plan, Architecture, Dispatch, Execution, Validation,
-  Review, QA, Doc, and Final Assessment subagents, performs Merge and Cleanup locally
+  Tree Rubrics, Tree Grading, QA, Doc, and Final Assessment subagents, performs Merge and Cleanup locally
   in the orchestrator, persists artifacts in `.pipeline-workspace/`, and coordinates
-  grouped execution/merge/validation/review/QA before final delivery assessment. When explicitly invoked,
+  grouped execution/merge/validation/tree-grading/QA before final delivery assessment. When explicitly invoked,
   treat that as user authorization for subagent delegation and safe parallel work within
   host constraints. Use when the user wants a feature, refactor, or subsystem built with
   explicit staged delivery, or mentions "pipeline", "multi-agent",
@@ -16,7 +16,7 @@ description: >
 
 Use this skill when the task is large enough to benefit from explicit staging instead of ad hoc implementation.
 
-The local Codex agent is the orchestrator. It owns user communication, artifact persistence, review aggregation, and final integration. Subagents own bounded stage work.
+The local Codex agent is the orchestrator. It owns user communication, artifact persistence, tree-grading aggregation, and final integration. Subagents own bounded stage work.
 
 ## Codex Execution Model
 
@@ -28,15 +28,15 @@ This skill is written for Codex, not as a generic "agent framework".
 - Keep orchestration local. Subagents produce artifacts or bounded code/doc changes; the orchestrator decides what to run next.
 - Default posture: keep the orchestrator thin and delegate aggressively. If a stage or bounded sidecar can be safely delegated without violating host constraints, delegate it.
 - Merge and Cleanup are orchestrator-local stages. Do not spawn subagents for them.
-- Default review mode is `EME`. Do not ask the user to choose unless speed or token budget is an explicit concern. Use `PRE` only for clearly small changes or when the user asks for a cheaper/faster pass.
+- Default grading uses 3 independent Tree Grading subagents. Do not downgrade the grader count unless the user explicitly asks for a cheaper/faster pass.
 - Ask the user only for blocking ambiguities. Otherwise proceed with explicit assumptions in `spec.json`.
 - Use `wait_agent` only when the next pipeline step is blocked on that result.
 - Never rely on the default `wait_agent` timeout for this skill. Always pass an explicit long `timeout_ms`.
 - Default waiting policy for this skill: use `timeout_ms: 600000` (10 minutes) for any stage that is blocking the next step.
 - If `wait_agent` returns without a final result because the timeout elapsed, treat that as "still running", not as failure. Keep the agent open and call `wait_agent` again with another long timeout until a final status arrives or a real blocker is identified.
-- While a blocking stage agent runs, keep doing non-overlapping local work: initialize `.pipeline-workspace/`, preload upcoming prompts/contracts, validate completed artifacts, prepare merge/review bookkeeping, and close finished agents to free thread budget. Do not sit idle waiting for work you can prepare now.
+- While a blocking stage agent runs, keep doing non-overlapping local work: initialize `.pipeline-workspace/`, preload upcoming prompts/contracts, validate completed artifacts, prepare merge/tree-grading bookkeeping, and close finished agents to free thread budget. Do not sit idle waiting for work you can prepare now.
 - Close completed agents after their outputs are integrated.
-- Be conscious of agent thread limits. Before any fan-out stage such as `EME` review, close finished stage agents so reviewer spawning does not fail on thread exhaustion.
+- Be conscious of agent thread limits. Before any fan-out stage such as Tree Grading, close finished stage agents so grader spawning does not fail on thread exhaustion.
 - Skill routing is explicit. When a stage requires a skill, the orchestrator prompt must name the skill and include the absolute path valid in the current environment.
 - This skill does not override higher-priority host rules. If host constraints prevent full fan-out, degrade minimally: preserve stage spawning first, then same-wave worker concurrency, then optional sidecars. Do not silently collapse to a fully local or fully serial run while safe delegation remains available.
 
@@ -58,14 +58,15 @@ This skill is written for Codex, not as a generic "agent framework".
 - Dispatch: `default`
 - Execution: `worker`
 - Validation: `worker`
-- Review: `default`
+- Tree Rubrics: `default`
+- Tree Grading: `default`
 - QA: `worker`
 - Doc: `worker`
 - Final Assessment: `default`
 - Merge: orchestrator-local
 - Cleanup: orchestrator-local
 
-Treat these as role targets. If the subagent is spawned with `fork_context: true`, encode the role in the prompt instead of passing `agent_type`. Use `explorer` only for narrow side questions during architecture or review, not for the main pipeline stages.
+Treat these as role targets. If the subagent is spawned with `fork_context: true`, encode the role in the prompt instead of passing `agent_type`. Use `explorer` only for narrow side questions during architecture or grading, not for the main pipeline stages.
 
 ## Model And Reasoning Policy
 
@@ -77,8 +78,8 @@ Recommended `wait_agent` timeouts for this skill:
 - Spec / Plan / Architecture / Dispatch: `timeout_ms: 600000`
 - Execution: `timeout_ms: 600000`
 - Validation: `timeout_ms: 600000`
-- Review `PRE`: `timeout_ms: 600000`
-- Review `EME`: `timeout_ms: 600000` per reviewer wait call
+- Tree Rubrics generation stages: `timeout_ms: 600000`
+- Tree Grading: `timeout_ms: 600000` per grader wait call
 - QA: `timeout_ms: 600000`
 - Doc: `timeout_ms: 600000`
 - Final Assessment: `timeout_ms: 600000`
@@ -135,14 +136,23 @@ Create a run workspace before the first stage:
 ├── conflict_resolutions/
 │   └── GROUP-1/
 │       └── iteration-1-conflict-resolution.json
-├── review_history/
+├── tree_rubrics/
 │   ├── GROUP-1/
-│   │   ├── iteration-1-reviewer-1.json
-│   │   ├── iteration-1-reviewer-2.json
-│   │   ├── iteration-1-reviewer-3.json
-│   │   └── iteration-1-review-feedback.json
+│   │   ├── iteration-1-classification.json
+│   │   ├── iteration-1-tree-rubrics.json
+│   │   ├── iteration-1-validation-result.json
+│   │   └── iteration-1-tree-rubrics-refined.json
 │   └── GROUP-2/
 │       └── ...
+├── final_outputs/
+│   └── GROUP-1/
+│       └── iteration-1-final-output-files.json
+├── grading_history/
+│   └── GROUP-1/
+│       ├── iteration-1-grader-1.json
+│       ├── iteration-1-grader-2.json
+│       ├── iteration-1-grader-3.json
+│       └── iteration-1-tree-grading-feedback.json
 ├── qa/
 │   ├── GROUP-1/
 │   │   └── iteration-1-qa-report.json
@@ -181,9 +191,9 @@ Event shape:
 ```
 
 State mapping:
-- `running`: active pipeline stages such as Spec, Plan, Execution, Validation, QA, and Doc.
-- `review`: Review and Final Assessment.
-- `failed`: Validation failure, Review failure, or rejected run.
+- `running`: active pipeline stages such as Spec, Plan, Execution, Validation, Tree Rubric generation, QA, and Doc.
+- `review`: Tree Grading and Final Assessment.
+- `failed`: Validation failure, Tree Grading failure, or rejected run.
 - `waiting`: pause for human input, including merge conflicts.
 - `waving`: accepted final result.
 
@@ -298,7 +308,7 @@ Routing rule:
 
 ### 5. Execution
 
-For each wave in `dispatch.json.execution_waves`, spawn one Execution `worker` per group that is ready to run. Give each worker `spec.json`, `plan.json`, `architecture.json`, its assigned `worker_group`, the current `base_ref` for that wave, and the latest group-specific `review_feedback.json` when retrying.
+For each wave in `dispatch.json.execution_waves`, spawn one Execution `worker` per group that is ready to run. Give each worker `spec.json`, `plan.json`, `architecture.json`, its assigned `worker_group`, the current `base_ref` for that wave, and the latest group-specific `tree_grading_feedback.json` when retrying.
 
 Worker ownership:
 - The worker owns only files listed in `dispatch.json.worker_groups[].owned_files` for its group, plus directly adjacent tests and docs it must touch.
@@ -319,11 +329,11 @@ Goal:
 - Analyze changed Python files with `scripts/better_highlights_cognitive_repro.py`.
 - Produce one `complexity-report.json` per worker group and iteration under `.pipeline-workspace/complexity/`.
 - Record a definite `readability_conclusion` (`high` or `low`) and `complexity_conclusion` (`high` or `low`).
-- Pass the report to Validation, Review, QA, Documentation, and Final Assessment as evidence.
+- Pass the report to Validation, QA, Documentation, and Final Assessment as evidence. Tree Grading does not consume complexity reports.
 
 Rule:
 - Non-Python changed files are recorded as skipped, not as failures.
-- Analyzer errors are preserved in the report and force `readability_conclusion = "low"` and `complexity_conclusion = "high"` so downstream stages review the code manually.
+- Analyzer errors are preserved in the report and force `readability_conclusion = "low"` and `complexity_conclusion = "high"` so downstream stages can inspect the code manually.
 
 ### 6. Merge
 
@@ -336,7 +346,7 @@ Goal:
 
 Merge rule:
 - Use conservative three-way merge semantics.
-- `merged`: merge succeeded and produced the reviewed main-workspace result.
+- `merged`: merge succeeded and produced the main-workspace result to snapshot for grading.
 - `noop`: the proposal introduces no effective change relative to the current main workspace.
 - `conflicted`: the merge is not safe to complete automatically. Write `merge-report.json`, keep the workspace intact, and enter `pause_for_human`.
 
@@ -344,9 +354,9 @@ Conflict rule:
 - Human conflict resolution produces `conflict-resolution.json`.
 - Resume from the Merge point after conflict resolution. Do not rerun Dispatch.
 
-### 7. Review
+### 7. Tree Rubrics Grading
 
-After every successful merge pass, run Validation for that worker group before Review. Run Review only when Validation passes or is skipped.
+After every successful merge pass, run Validation for that worker group before Tree Rubrics grading. Run grading only when Validation passes or is skipped.
 
 ### 7a. Validation
 
@@ -355,64 +365,64 @@ Spawn a Validation `worker` for each merged worker group with the group's `execu
 Goal:
 - Detect the project language and run the fix/check layers defined in `agents/validation.md`.
 - Produce one `validation-report.json` per worker group and iteration.
-- Provide objective command output for Review's Correctness and Test Coverage dimensions.
+- Provide command-layer evidence for QA and Final Assessment. Tree Grading itself does not consume this process evidence.
 
 Integration rule:
 - If `validation-report.json.status == "failed"` or `"error"`, route directly back to Execution for that group and pass the validation report as retry context.
-- If `validation-report.json.status == "passed"` or `"skipped"`, continue to Review and pass `validation-report.json` and `complexity-report.json` inline in the Review prompt.
-- If fix-layer commands modified files, the orchestrator treats those changes as part of the current merged main-workspace result before Review.
+- If `validation-report.json.status == "passed"` or `"skipped"`, continue to Tree Rubrics grading.
+- If fix-layer commands modified files, the orchestrator treats those changes as part of the current merged main-workspace result before final output snapshotting.
 
-### 7b. Review
+### 7b. Tree Rubrics Generation And Grading
 
-Run review after every successful validation pass for each worker group independently.
+Run Tree Rubrics generation and grading after every successful validation pass for each worker group independently.
 
-`EME` mode:
-- Spawn 3 independent Review subagents in parallel.
-- Give each reviewer the same group-specific inputs and a distinct `reviewer_id`.
-- Each reviewer returns one `review_individual_N.json`.
-- The orchestrator writes all reviewer outputs to that group's `review_history/` folder and merges them into a group-specific `review_feedback.json`.
+Generation stages:
+- Spawn `tree-classification`, `tree-rubric-generation`, `tree-rubric-verification`, and `tree-rubric-refinement` in sequence.
+- Produce `classification.json`, `tree_rubrics.json`, `validation_result.json`, and `tree_rubrics_refined.json` under `tree_rubrics/<group>/`.
+- These stages may use `spec.json`, `architecture.json`, and `worker_group` to define the scoped task.
 
-`PRE` mode:
-- Spawn 1 Review subagent.
-- Convert its single review directly into the group-specific `review_feedback.json`.
+Final output snapshot:
+- The orchestrator writes `final-output-files.json` locally from `execution-report.changed_files ∪ worker_group.owned_files`.
+- Each entry records `path`, `status`, and `content`.
 
-Routing rule:
-- Review evaluates the merged main-workspace result, not the worker fork directly.
-- Review must treat `complexity-report.json` as supporting evidence for Code Quality and Architecture Compliance.
-- If `worker_group.required_skills` contains `ce-frontend-design`, the orchestrator prompt must explicitly attach that skill with its current-environment path.
-- Frontend-design reviewers must emit `frontend_design_assessment` and map those findings back into the PRE dimensions.
+Grading rule:
+- Spawn exactly 3 independent `tree-grading` subagents in parallel.
+- Each grader receives only `spec.json`, `worker_group`, `tree_rubrics_refined.json`, `final-output-files.json`, `grader_id`, and `iteration`.
+- Graders must not receive or depend on execution, merge, validation, complexity, logs, retries, or agent behavior.
+- Each grader returns `tree_grading_individual_N.json` with 0/1 scores for every node.
 
-Voting rules:
-- `warning` counts as `pass` for majority voting.
-- Any failed dimension keeps that worker group in the Execution/Review loop.
-- Preserve warnings even when the final verdict is `pass`.
+Aggregation rule:
+- The orchestrator majority-votes each node across the 3 graders.
+- Apply same-branch dependency chains: a failed shallower node forces deeper nodes to effective score 0.
+- Compute `weighted_score` with depth weights: D1=1, D2=2, D3+=3.
+- `tree_grading_feedback.json.verdict == "pass"` only when `weighted_score >= 0.80` and all depth-1 nodes pass.
 
 Loop rule:
-- Each worker group repeats Execution → Complexity Hook → Merge → Validation → Review until its `review_feedback.json.verdict == "pass"` or the user stops the pipeline.
-- A downstream wave does not begin until every group it depends on has passed review and been integrated.
+- Each worker group repeats Execution → Complexity Hook → Merge → Validation → Tree Rubrics Grading until its `tree_grading_feedback.json.verdict == "pass"` or the user stops the pipeline.
+- A downstream wave does not begin until every group it depends on has passed tree grading and been integrated.
 
 ### 8. QA
 
-After a worker group passes review, spawn a QA `worker` for that group with `spec.json`, `architecture.json`, the group's `execution-report.json`, the group's `complexity-report.json`, the group's `validation-report.json`, and the group's `review_feedback.json`.
+After a worker group passes tree grading, spawn a QA `worker` for that group with `spec.json`, `architecture.json`, the group's `execution-report.json`, the group's `complexity-report.json`, the group's `validation-report.json`, and the group's `tree_grading_feedback.json`.
 
 Goal:
-- Run runtime or scenario validation that command-layer Validation and static Review cannot cover.
+- Run runtime or scenario validation that command-layer Validation and Tree Rubrics grading cannot cover.
 - Produce one `qa-report.json` per worker group
 - Catch scenario failures before documentation or final delivery assessment
 
 Parallelism rule:
-- When multiple groups in the same wave are already review-passed, their QA workers may run concurrently because QA is read-only with respect to integrated source changes.
+- When multiple groups in the same wave are already tree-grading-passed, their QA workers may run concurrently because QA is read-only with respect to integrated source changes.
 
 Cleanup rule:
-- A group becomes cleanup-eligible only after both `review_feedback.json.verdict == "pass"` and `qa-report.json.status == "pass"`.
+- A group becomes cleanup-eligible only after both `tree_grading_feedback.json.verdict == "pass"` and `qa-report.json.status == "pass"`.
 - QA removes only its own temporary scripts or fixtures. It does not delete pipeline artifacts.
 
 Gate:
-- Do not move to Documentation until every worker group has passed Validation, Review, and QA.
+- Do not move to Documentation until every worker group has passed Validation, Tree Grading, and QA.
 
 ### 9. Documentation
 
-After all worker groups have passed review and QA, spawn a Doc `worker` with `spec.json`, `architecture.json`, the final integrated execution reports, and the complexity reports.
+After all worker groups have passed tree grading and QA, spawn a Doc `worker` with `spec.json`, `architecture.json`, the final integrated execution reports, the complexity reports, and tree grading feedback.
 
 Goal:
 - Update only the docs that actually changed
@@ -423,7 +433,7 @@ Before final delivery, the orchestrator must review and integrate the Doc worker
 
 ### 10. Final Assessment
 
-After documentation is integrated, spawn the Final Assessment subagent with the full artifact set: `spec.json`, `spec.md`, `plan.json`, `architecture.json`, `dispatch.json`, all execution reports, all complexity reports, all merge reports, all validation reports, all conflict resolutions, all review feedback artifacts, all QA reports, and `doc-report.json`.
+After documentation is integrated, spawn the Final Assessment subagent with the full artifact set: `spec.json`, `spec.md`, `plan.json`, `architecture.json`, `dispatch.json`, all execution reports, all complexity reports, all merge reports, all validation reports, all conflict resolutions, all tree grading feedback artifacts, all QA reports, and `doc-report.json`.
 
 Goal:
 - Evaluate the delivered feature holistically across all worker groups
@@ -457,7 +467,7 @@ For each spawned stage:
 - Pass artifact contents or file paths explicitly
 - For any required skill, include the exact skill name and the absolute path valid in the current environment
 - Spec and Plan prompts must attach `superpowers` and explicitly forbid its build, TDD, commit, and finish-branch behaviors
-- Execution and Review prompts must attach `ce-frontend-design` whenever `worker_group.required_skills` contains it
+- Execution prompts must attach `ce-frontend-design` whenever `worker_group.required_skills` contains it. Tree Grading prompts do not attach implementation skills because graders only see final output files.
 - When this skill was explicitly invoked by the user, prompts may treat subagent delegation and safe parallel work as already authorized within host constraints
 - Tell the subagent to return exactly one fenced `json` block and no extra prose
 
@@ -468,21 +478,21 @@ For each spawned stage:
 - If a subagent response is malformed, fix the prompt and rerun that stage instead of hand-waving the artifact.
 - Write artifacts even when the corresponding stage also changed files. Artifact persistence and code/doc integration are separate responsibilities.
 - The orchestrator writes `merge-report.json`, `conflict-resolution.json`, and `.pipeline-last-run-summary.json` locally.
-- Cleanup eligibility is derived locally after Validation, Review, and QA pass. It is not delegated to a subagent.
+- Cleanup eligibility is derived locally after Validation, Tree Grading, and QA pass. It is not delegated to a subagent.
 
-### Review Aggregation
+### Tree Grading Aggregation
 
-The orchestrator merges reviewer outputs locally:
-- Exactly 8 PRE dimensions
-- Majority vote per dimension in `EME`
-- Merge all failed-dimension issues into `merged_issues`
-- Keep reviewer IDs in `flagged_by`
-- Increment `iteration` on every review pass for the relevant worker group
+The orchestrator merges grader outputs locally:
+- Score every rubric node by majority vote across 3 graders
+- Apply same-branch dependency-chain zeroing before computing final score
+- Compute `weighted_score`, `pass_rate`, `nodes_passed`, `nodes_failed`, and `blocking_nodes`
+- Keep non-blocking failed deep nodes when the weighted gate still passes
+- Increment `iteration` on every tree grading pass for the relevant worker group
 
 Operational note:
-- In real Codex sessions, `EME` review is the most likely point to hit thread limits because it spawns 3 reviewers at once.
-- Close Spec, Plan, Architecture, and any completed Execution agents before spawning the reviewer trio.
-- If a reviewer spawn still fails because of temporary thread pressure, close any finished idle agents first, then retry the missing reviewer instead of downgrading silently to fewer reviewers.
+- In real Codex sessions, Tree Grading is the most likely point to hit thread limits because it spawns 3 graders at once.
+- Close Spec, Plan, Architecture, Tree Rubric generation, and any completed Execution agents before spawning the grader trio.
+- If a grader spawn still fails because of temporary thread pressure, close any finished idle agents first, then retry the missing grader instead of downgrading silently to fewer graders.
 
 ### File Ownership And Worker Routing
 
@@ -502,7 +512,7 @@ When spawning `worker` agents:
 
 ### Cleanup Policy
 
-- Validation, Review, and QA passing make a group cleanup-eligible, but do not delete artifacts immediately.
+- Validation, Tree Grading, and QA passing make a group cleanup-eligible, but do not delete artifacts immediately.
 - Only accepted runs automatically delete `.pipeline-workspace/`.
 - Rejected or paused runs keep their workspace and artifacts so the next iteration can restart from `merge` or `execution`.
 - `.pipeline-last-run-summary.json` is the retained summary artifact for terminal runs.
@@ -516,8 +526,8 @@ Skip this pipeline for:
 
 ## Files To Read
 
-- Stage prompts: `agents/spec.md`, `agents/plan.md`, `agents/architecture.md`, `agents/dispatch.md`, `agents/execution.md`, `agents/validation.md`, `agents/review.md`, `agents/qa.md`, `agents/doc.md`, `agents/final-assessment.md`
+- Stage prompts: `agents/spec.md`, `agents/plan.md`, `agents/architecture.md`, `agents/dispatch.md`, `agents/execution.md`, `agents/validation.md`, `agents/tree-classification.md`, `agents/tree-rubric-generation.md`, `agents/tree-rubric-verification.md`, `agents/tree-rubric-refinement.md`, `agents/tree-grading.md`, `agents/qa.md`, `agents/doc.md`, `agents/final-assessment.md`
 - Contracts: `references/contracts.md`
-- Review rubric: `references/pre-rubric.md`
+- Deprecated review rubric: `references/pre-rubric.md`
 - Example artifact flow: `references/example-run.md`
 - External skills when routed by the current Codex environment: `superpowers`, `ce-frontend-design`

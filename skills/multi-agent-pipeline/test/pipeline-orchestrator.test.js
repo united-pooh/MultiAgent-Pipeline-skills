@@ -11,6 +11,7 @@ import {
   MergeEngine,
   PipelineOrchestrator,
   aggregateReviewFeedback,
+  aggregateTreeGradingFeedback,
   createCodexPetEvent,
   loadStageCatalog,
   runComplexityHook,
@@ -191,6 +192,193 @@ function makeReviewArtifact(reviewerId, options = {}) {
     applied_skills: [],
     pre_results: makePreResults(options),
     frontend_design_assessment: null,
+  };
+}
+
+function makeTreeClassification(groupId = "GROUP-1") {
+  return {
+    version: "1.0",
+    task_id: `${groupId}-task`,
+    group_id: groupId,
+    task_type: "code_implementation",
+    depth_enhancement_applicable: true,
+    recommended_branches: [
+      {
+        name: "功能正确性",
+        name_en: "Correctness",
+        rationale: "The final output must implement the requested behavior.",
+      },
+      {
+        name: "可维护性",
+        name_en: "Maintainability",
+        rationale: "The final output should stay understandable.",
+      },
+    ],
+    summary: "Code implementation task with two independent grading branches.",
+  };
+}
+
+function makeTreeRubrics(groupId = "GROUP-1", outputFile = "src/app.txt") {
+  return {
+    version: "1.0",
+    task_id: `${groupId}-task`,
+    group_id: groupId,
+    task_type: "code_implementation",
+    branches: [
+      {
+        name: "功能正确性",
+        name_en: "Correctness",
+        nodes: [
+          {
+            depth: 1,
+            id: "B1-D1-01",
+            content: "最终输出文件包含实现所需功能的代码或文本。",
+            source: "KEEP_01",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: [outputFile],
+          },
+          {
+            depth: 2,
+            id: "B1-D2-01",
+            content: "最终输出以可复用方式表达该功能，而不是只留下占位内容。",
+            source: "DEEPEN",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: [outputFile],
+          },
+        ],
+      },
+      {
+        name: "可维护性",
+        name_en: "Maintainability",
+        nodes: [
+          {
+            depth: 1,
+            id: "B2-D1-01",
+            content: "最终输出文件保持清晰、可读、没有明显破坏性内容。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: [outputFile],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function makeTreeVerification(groupId = "GROUP-1") {
+  return {
+    version: "1.0",
+    task_id: `${groupId}-task`,
+    group_id: groupId,
+    status: "pass",
+    dimension_results: [
+      "Core Criteria Preservation",
+      "Added Criteria Justification",
+      "Breadth And Depth Correctness",
+      "Depth Discrimination",
+      "Node Count And Coverage",
+      "End-To-End Compliance",
+      "Depth Enhancement Quality",
+    ].map((dimension) => ({
+      dimension,
+      status: "pass",
+      evidence: `${dimension} verified from task requirements.`,
+      suggestion: null,
+    })),
+    required_changes: [],
+    summary: "Rubric is ready for refinement without changes.",
+  };
+}
+
+function makeTreeGradingArtifact({
+  graderId,
+  groupId = "GROUP-1",
+  iteration = 1,
+  rubric = makeTreeRubrics(groupId),
+  failingNodeIds = [],
+  evidenceFile = "src/app.txt",
+}) {
+  const failing = new Set(failingNodeIds);
+  return {
+    version: "1.0",
+    group_id: groupId,
+    iteration,
+    grader_id: graderId,
+    task_id: rubric.task_id,
+    node_results: rubric.branches.flatMap((branch) =>
+      branch.nodes.map((node) => ({
+        node_id: node.id,
+        raw_score: failing.has(node.id) ? 0 : 1,
+        evidence: `${evidenceFile}:1 shows the final output content used for grading.`,
+        failure_reason: failing.has(node.id) ? `${node.id} is not satisfied.` : null,
+        suggestion: failing.has(node.id) ? `Update ${evidenceFile} to satisfy ${node.id}.` : null,
+      })),
+    ),
+  };
+}
+
+function makeTreeStageResponses({
+  groupId = "GROUP-1",
+  iteration = 1,
+  outputFile = "src/app.txt",
+  failingNodeIds = [],
+} = {}) {
+  const rubric = makeTreeRubrics(groupId, outputFile);
+  return {
+    [`tree-classification:${groupId}:iteration-${iteration}`]: {
+      rawOutput: jsonBlock(makeTreeClassification(groupId)),
+    },
+    [`tree-rubric-generation:${groupId}:iteration-${iteration}`]: {
+      rawOutput: jsonBlock(rubric),
+    },
+    [`tree-rubric-verification:${groupId}:iteration-${iteration}`]: {
+      rawOutput: jsonBlock(makeTreeVerification(groupId)),
+    },
+    [`tree-rubric-refinement:${groupId}:iteration-${iteration}`]: {
+      rawOutput: jsonBlock(rubric),
+    },
+    [`tree-grading:${groupId}:iteration-${iteration}:grader-1`]: (request) => {
+      assert.equal(request.context.finalOutputFiles.files[0].path, outputFile);
+      assert.equal(request.context.executionReport, undefined);
+      assert.equal(request.context.validationReport, undefined);
+      assert.equal(request.context.complexityReport, undefined);
+      return {
+        rawOutput: jsonBlock(
+          makeTreeGradingArtifact({
+            graderId: 1,
+            groupId,
+            iteration,
+            rubric,
+            failingNodeIds,
+            evidenceFile: outputFile,
+          }),
+        ),
+      };
+    },
+    [`tree-grading:${groupId}:iteration-${iteration}:grader-2`]: {
+      rawOutput: jsonBlock(
+        makeTreeGradingArtifact({
+          graderId: 2,
+          groupId,
+          iteration,
+          rubric,
+          failingNodeIds,
+          evidenceFile: outputFile,
+        }),
+      ),
+    },
+    [`tree-grading:${groupId}:iteration-${iteration}:grader-3`]: {
+      rawOutput: jsonBlock(
+        makeTreeGradingArtifact({
+          graderId: 3,
+          groupId,
+          iteration,
+          rubric,
+          failingNodeIds,
+          evidenceFile: outputFile,
+        }),
+      ),
+    },
   };
 }
 
@@ -517,6 +705,132 @@ test("aggregateReviewFeedback preserves warnings and majority voting", async () 
   assert.equal(feedback.eme_votes[1].final_score, "pass");
 });
 
+test("aggregateTreeGradingFeedback applies depth weights, dependency chains, and gates", async () => {
+  const rubric = makeTreeRubrics("GROUP-1", "src/app.txt");
+  const depthOneFailure = aggregateTreeGradingFeedback({
+    threshold: 0.8,
+    requireDepthOnePass: true,
+    rubric,
+    graderResults: [1, 2, 3].map((graderId) =>
+      makeTreeGradingArtifact({
+        graderId,
+        rubric,
+        failingNodeIds: ["B1-D1-01"],
+        evidenceFile: "src/app.txt",
+      }),
+    ),
+  });
+  assert.equal(depthOneFailure.verdict, "fail");
+  assert.equal(depthOneFailure.weighted_score, 0.25);
+  assert.deepEqual(depthOneFailure.blocking_nodes.sort(), ["B1-D1-01", "B1-D2-01"].sort());
+  assert.equal(
+    depthOneFailure.node_results.find((result) => result.node_id === "B1-D2-01")
+      .dependency_blocked_by,
+    "B1-D1-01",
+  );
+
+  const thresholdFailure = aggregateTreeGradingFeedback({
+    threshold: 0.8,
+    requireDepthOnePass: true,
+    rubric,
+    graderResults: [1, 2, 3].map((graderId) =>
+      makeTreeGradingArtifact({
+        graderId,
+        rubric,
+        failingNodeIds: ["B1-D2-01"],
+        evidenceFile: "src/app.txt",
+      }),
+    ),
+  });
+  assert.equal(thresholdFailure.verdict, "fail");
+  assert.equal(thresholdFailure.weighted_score, 0.5);
+
+  const wideRubric = {
+    ...rubric,
+    branches: [
+      ...rubric.branches,
+      {
+        name: "额外质量",
+        name_en: "Additional Quality",
+        nodes: [
+          {
+            depth: 1,
+            id: "B3-D1-01",
+            content: "额外基础质量达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+          {
+            depth: 1,
+            id: "B3-D1-02",
+            content: "额外基础兼容性达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+          {
+            depth: 1,
+            id: "B3-D1-03",
+            content: "额外基础可读性达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+          {
+            depth: 1,
+            id: "B3-D1-04",
+            content: "额外基础测试信号达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+          {
+            depth: 1,
+            id: "B3-D1-05",
+            content: "额外基础文档信号达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+          {
+            depth: 1,
+            id: "B3-D1-06",
+            content: "额外基础集成信号达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+          {
+            depth: 1,
+            id: "B3-D1-07",
+            content: "额外基础回归信号达标。",
+            source: "ADD",
+            requirement_ids: ["REQ-001"],
+            output_file_hints: ["src/app.txt"],
+          },
+        ],
+      },
+    ],
+  };
+  const nonBlockingDeepFailure = aggregateTreeGradingFeedback({
+    threshold: 0.8,
+    requireDepthOnePass: true,
+    rubric: wideRubric,
+    graderResults: [1, 2, 3].map((graderId) =>
+      makeTreeGradingArtifact({
+        graderId,
+        rubric: wideRubric,
+        failingNodeIds: ["B1-D2-01"],
+        evidenceFile: "src/app.txt",
+      }),
+    ),
+  });
+  assert.equal(nonBlockingDeepFailure.verdict, "pass");
+  assert.ok(nonBlockingDeepFailure.weighted_score >= 0.8);
+  assert.deepEqual(nonBlockingDeepFailure.non_blocking_nodes, ["B1-D2-01"]);
+});
+
 test("merge engine pauses on conflicting text changes", async () => {
   const repoRoot = await createRepoFixture();
   const store = new ArtifactStore({ repoRoot });
@@ -582,6 +896,11 @@ test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => 
     "dispatch",
     "execution",
     "validation",
+    "tree-classification",
+    "tree-rubric-generation",
+    "tree-rubric-verification",
+    "tree-rubric-refinement",
+    "tree-grading",
     "qa",
     "doc",
     "final-assessment",
@@ -594,16 +913,11 @@ test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => 
     assert.equal(profile.serviceTier, "priority", stage);
   }
 
-  assert.deepEqual(
-    catalog.resolveStageProfile("review", { reviewMode: "PRE", reviewerId: 1 }),
-    catalog.stageProfiles.review,
-  );
-
-  for (const reviewerId of [1, 2, 3]) {
-    const profile = catalog.resolveStageProfile("review", { reviewMode: "EME", reviewerId });
-    assert.equal(profile.model, "gpt-5.5", `reviewer-${reviewerId}`);
-    assert.equal(profile.reasoningEffort, "xhigh", `reviewer-${reviewerId}`);
-    assert.equal(profile.serviceTier, "priority", `reviewer-${reviewerId}`);
+  for (const graderId of [1, 2, 3]) {
+    const profile = catalog.resolveStageProfile("tree-grading", { graderId });
+    assert.equal(profile.model, "gpt-5.5", `grader-${graderId}`);
+    assert.equal(profile.reasoningEffort, "xhigh", `grader-${graderId}`);
+    assert.equal(profile.serviceTier, "priority", `grader-${graderId}`);
   }
 });
 
@@ -734,20 +1048,10 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
         rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
       };
     },
-    "review:GROUP-1:iteration-1:reviewer-1": (request) => {
-      assert.equal(request.context.complexityReport.readability_conclusion, "high");
-      return { rawOutput: jsonBlock(makeReviewArtifact(1)) };
-    },
-    "review:GROUP-1:iteration-1:reviewer-2": (request) => {
-      assert.equal(request.context.complexityReport.status, "completed");
-      return { rawOutput: jsonBlock(makeReviewArtifact(2)) };
-    },
-    "review:GROUP-1:iteration-1:reviewer-3": (request) => {
-      assert.equal(request.context.complexityReport.function_count, 1);
-      return { rawOutput: jsonBlock(makeReviewArtifact(3)) };
-    },
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 1, outputFile: "src/app.py" }),
     "qa:GROUP-1:iteration-1": (request) => {
       assert.equal(request.context.complexityReport.status, "completed");
+      assert.equal(request.context.treeGradingFeedback.verdict, "pass");
       return { rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1)) };
     },
     doc: {
@@ -761,6 +1065,8 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
       assert.equal(request.context.complexityReports.length, 1);
       assert.equal(request.context.complexityReports[0].readability_conclusion, "high");
       assert.equal(request.context.complexityReports[0].complexity_conclusion, "low");
+      assert.equal(request.context.treeGradingFeedbacks.length, 1);
+      assert.equal(request.context.treeGradingFeedbacks[0].weighted_score, 1);
       return {
         rawOutput: jsonBlock(makeFinalAssessmentArtifact()),
       };
@@ -792,6 +1098,8 @@ test("pipeline orchestrator runs happy path and cleans workspace on accept", asy
   assert.equal(summary.verdict, "accept");
   assert.equal(summary.complexity_summary.length, 1);
   assert.equal(summary.complexity_summary[0].status, "completed");
+  assert.equal(summary.tree_grading_summary.length, 1);
+  assert.equal(summary.tree_grading_summary[0].weighted_score, 1);
   assert.ok(summary.codex_pet_events.some((event) => event.state === "review"));
   assert.equal(summary.codex_pet_events.at(-1).state, "waving");
   assert.match(summary.codex_pet_events.at(-1).directive, /^::codex-pet\{state="waving"/);
@@ -868,12 +1176,13 @@ test("retry iterations use a fresh base snapshot before each execution pass", as
     "validation:GROUP-1:iteration-2": {
       rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 2)),
     },
-    "review:GROUP-1:iteration-1:reviewer-1": {
-      rawOutput: jsonBlock(makeReviewArtifact(1, { failingCriterion: "Code Quality" })),
-    },
-    "review:GROUP-1:iteration-2:reviewer-1": {
-      rawOutput: jsonBlock(makeReviewArtifact(1)),
-    },
+    ...makeTreeStageResponses({
+      groupId: "GROUP-1",
+      iteration: 1,
+      outputFile: "src/app.txt",
+      failingNodeIds: ["B1-D1-01"],
+    }),
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 2, outputFile: "src/app.txt" }),
     "qa:GROUP-1:iteration-2": {
       rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 2)),
     },
@@ -1001,8 +1310,8 @@ test("same-wave groups keep execution and QA parallelizable while merge integrat
     "validation:GROUP-2:iteration-1": {
       rawOutput: jsonBlock(makeValidationArtifact("GROUP-2", 1)),
     },
-    "review:GROUP-1:iteration-1:reviewer-1": { rawOutput: jsonBlock(makeReviewArtifact(1)) },
-    "review:GROUP-2:iteration-1:reviewer-1": { rawOutput: jsonBlock(makeReviewArtifact(1)) },
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 1, outputFile: "src/group-a.txt" }),
+    ...makeTreeStageResponses({ groupId: "GROUP-2", iteration: 1, outputFile: "src/group-b.txt" }),
     "qa:GROUP-1:iteration-1": async () => {
       qaTracker.active += 1;
       qaTracker.maxActive = Math.max(qaTracker.maxActive, qaTracker.active);
@@ -1091,7 +1400,7 @@ test("resumeAfterConflict consumes conflict-resolution artifacts and passes reco
     "validation:GROUP-1:iteration-1": {
       rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
     },
-    "review:GROUP-1:iteration-1:reviewer-1": { rawOutput: jsonBlock(makeReviewArtifact(1)) },
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 1, outputFile: "src/app.txt" }),
     "qa:GROUP-1:iteration-1": { rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1)) },
     doc: { rawOutput: jsonBlock(makeDocArtifact()) },
     "final-assessment": (request) => {

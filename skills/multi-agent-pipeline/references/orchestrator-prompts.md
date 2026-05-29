@@ -8,7 +8,7 @@ Use these templates as default Codex `spawn_agent` prompt scaffolds. Fill the pl
 - Pass artifact JSON inline when the subagent needs exact content; otherwise pass exact repo-relative or absolute paths.
 - Tell the subagent to return exactly one fenced `json` block and no extra prose, except for the Spec stage, which returns two blocks: one `json` and one `markdown`.
 - For retries or rework passes, name the triggering artifact and the current iteration.
-- For `Execution` and `Review`, include the Playwright skill path only when real browser validation may be required.
+- For `Execution`, include the Playwright skill path only when real browser validation may be required.
 - For `Spec` and `Plan`, attach the `superpowers` skill and explicitly restrict it to brainstorming/planning discipline.
 - Use the stage profile's pinned model settings by default: `model: "gpt-5.5"`, `reasoning_effort: "xhigh"`, and `service_tier: "priority"`.
 - The profile field names are camelCase (`reasoningEffort`, `serviceTier`); convert them to the `spawn_agent` snake_case fields when calling the tool.
@@ -215,7 +215,7 @@ Inputs:
 - current architecture.json:
 <paste architecture.json content>
 - latest execution-report.json: <paste content or omit>
-- latest review_feedback.json: <paste content or omit>
+- latest tree_grading_feedback.json: <paste content or omit>
 - Repo root: <repo_root>
 
 This is an upward rework pass. Decide whether architecture repair is sufficient or the plan must be redone.
@@ -241,7 +241,7 @@ Inputs:
 <paste plan.json content>
 - architecture.json:
 <paste architecture.json content>
-- latest review_feedback.json: <paste content or omit>
+- latest tree_grading_feedback.json: <paste content or omit>
 - validation-report.json from the previous attempt: <paste content or omit>
 - Repo root: <repo_root>
 - Iteration: <n>
@@ -313,7 +313,128 @@ This is a sync pass. Do not redesign the task. Land the intended implementation 
 Return exactly one fenced `json` block and no extra prose.
 ```
 
+## Tree Rubrics Generation And Grading
+
+Run these stages after Validation passes or skips for a worker group.
+
+### Tree Classification
+
+```text
+Follow:
+- <skill>/agents/tree-classification.md
+- <skill>/references/contracts.md
+
+Inputs:
+- spec.json:
+<paste spec.json content>
+- architecture.json:
+<paste architecture.json content>
+- worker_group:
+<paste worker group>
+- Iteration: <iteration>
+
+Return exactly one fenced `json` block with `classification.json` and no extra prose.
+```
+
+### Tree Rubric Generation
+
+```text
+Follow:
+- <skill>/agents/tree-rubric-generation.md
+- <skill>/references/contracts.md
+
+Inputs:
+- spec.json:
+<paste spec.json content>
+- architecture.json:
+<paste architecture.json content>
+- worker_group:
+<paste worker group>
+- classification.json:
+<paste classification.json content>
+
+Return exactly one fenced `json` block with `tree_rubrics.json` and no extra prose.
+```
+
+### Tree Rubric Verification
+
+```text
+Follow:
+- <skill>/agents/tree-rubric-verification.md
+- <skill>/references/contracts.md
+
+Inputs:
+- spec.json:
+<paste spec.json content>
+- worker_group:
+<paste worker group>
+- classification.json:
+<paste classification.json content>
+- tree_rubrics.json:
+<paste tree_rubrics.json content>
+
+Return exactly one fenced `json` block with `validation_result.json` and no extra prose.
+```
+
+### Tree Rubric Refinement
+
+```text
+Follow:
+- <skill>/agents/tree-rubric-refinement.md
+- <skill>/references/contracts.md
+
+Inputs:
+- spec.json:
+<paste spec.json content>
+- worker_group:
+<paste worker group>
+- classification.json:
+<paste classification.json content>
+- tree_rubrics.json:
+<paste tree_rubrics.json content>
+- validation_result.json:
+<paste validation_result.json content>
+
+Return exactly one fenced `json` block with `tree_rubrics_refined.json` and no extra prose.
+```
+
+### Tree Grading
+
+Spawn all 3 graders before waiting on them.
+
+```text
+Follow:
+- <skill>/agents/tree-grading.md
+- <skill>/references/contracts.md
+
+Inputs:
+- spec.json:
+<paste spec.json content>
+- worker_group:
+<paste worker group>
+- tree_rubrics_refined.json:
+<paste tree_rubrics_refined.json content>
+- final-output-files.json:
+<paste final-output-files.json content>
+- Grader ID: <grader_id>
+- Iteration: <iteration>
+
+Only use the final output file contents. Do not use execution, merge, validation, complexity, logs, retries, or tool traces.
+Return exactly one fenced `json` block with `tree_grading_individual_N.json` and no extra prose.
+```
+
+**spawn_agent calls:**
+```json
+[
+  {"agent_type": "default", "fork_context": false, "message": "<grader_id: 1>"},
+  {"agent_type": "default", "fork_context": false, "message": "<grader_id: 2>"},
+  {"agent_type": "default", "fork_context": false, "message": "<grader_id: 3>"}
+]
+```
+
 ## Review PRE
+
+Deprecated compatibility path. The current pipeline uses Tree Rubrics Generation And Grading instead.
 
 ```text
 You are reviewer <reviewer_id> for a Codex multi-agent pipeline in PRE mode.
@@ -419,7 +540,7 @@ Inputs:
 - spec.json:
 <paste spec.json content>
 - latest execution-report.json: <paste content or omit>
-- latest review_feedback.json: <paste content or omit>
+- latest tree_grading_feedback.json: <paste content or omit>
 - latest architecture.json: <paste content or omit>
 
 This is a rework pass. Redo phase decomposition, dependency order, execution order, and ownership boundaries.
@@ -447,8 +568,8 @@ Inputs:
 <paste complexity-report.json content>
 - validation-report.json:
 <paste validation-report.json content>
-- review_feedback.json:
-<paste review_feedback.json content>
+- tree_grading_feedback.json:
+<paste tree_grading_feedback.json content>
 - merge-report.json:
 <paste merge-report.json content>
 - Repo root: <repo_root>
@@ -486,8 +607,8 @@ Inputs:
 <paste complexity-report.json content>
 - validation-report.json:
 <paste validation-report.json content>
-- review_feedback.json:
-<paste review_feedback.json content>
+- tree_grading_feedback.json:
+<paste tree_grading_feedback.json content>
 - qa-report.json:
 <paste qa-report.json content>
 - Repo root: <repo_root>
@@ -531,8 +652,8 @@ Inputs:
 <paste merge reports>
 - all validation reports:
 <paste validation reports>
-- all review feedback artifacts:
-<paste review feedback>
+- all tree grading feedback artifacts:
+<paste tree grading feedback>
 - all QA reports:
 <paste QA reports>
 - doc-report.json:
