@@ -3,6 +3,9 @@ import path from "node:path";
 
 export const DEFAULT_WAIT_TIMEOUT_MS = 600_000;
 export const DEFAULT_REVIEW_MODE = "EME";
+export const DEFAULT_GRADER_COUNT = 3;
+export const DEFAULT_GRADING_THRESHOLD = 0.8;
+export const DEFAULT_REQUIRE_DEPTH_ONE_PASS = true;
 export const DEFAULT_SUBAGENT_MODEL = "gpt-5.5";
 export const DEFAULT_SUBAGENT_REASONING_EFFORT = "xhigh";
 export const DEFAULT_SUBAGENT_SERVICE_TIER = "priority";
@@ -22,6 +25,16 @@ export const PRE_CRITERIA = [
   "Architecture Compliance",
   "Test Coverage",
   "Backward Compatibility",
+];
+
+export const TREE_RUBRIC_VALIDATION_DIMENSIONS = [
+  "Core Criteria Preservation",
+  "Added Criteria Justification",
+  "Breadth And Depth Correctness",
+  "Depth Discrimination",
+  "Node Count And Coverage",
+  "End-To-End Compliance",
+  "Depth Enhancement Quality",
 ];
 
 export const FINAL_ASSESSMENT_DIMENSIONS = [
@@ -89,6 +102,41 @@ export const DEFAULT_STAGE_PROFILES = Object.freeze({
     promptFile: "agents/validation.md",
     referenceFiles: ["references/contracts.md"],
     agentType: "worker",
+    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+  },
+  "tree-classification": {
+    ...DEFAULT_SUBAGENT_PROFILE,
+    promptFile: "agents/tree-classification.md",
+    referenceFiles: ["references/contracts.md"],
+    agentType: "default",
+    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+  },
+  "tree-rubric-generation": {
+    ...DEFAULT_SUBAGENT_PROFILE,
+    promptFile: "agents/tree-rubric-generation.md",
+    referenceFiles: ["references/contracts.md"],
+    agentType: "default",
+    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+  },
+  "tree-rubric-verification": {
+    ...DEFAULT_SUBAGENT_PROFILE,
+    promptFile: "agents/tree-rubric-verification.md",
+    referenceFiles: ["references/contracts.md"],
+    agentType: "default",
+    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+  },
+  "tree-rubric-refinement": {
+    ...DEFAULT_SUBAGENT_PROFILE,
+    promptFile: "agents/tree-rubric-refinement.md",
+    referenceFiles: ["references/contracts.md"],
+    agentType: "default",
+    waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
+  },
+  "tree-grading": {
+    ...DEFAULT_SUBAGENT_PROFILE,
+    promptFile: "agents/tree-grading.md",
+    referenceFiles: ["references/contracts.md"],
+    agentType: "default",
     waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
   },
   review: {

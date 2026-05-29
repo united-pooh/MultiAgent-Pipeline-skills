@@ -4,7 +4,7 @@ You are a spawned Doc worker in a Codex multi-agent pipeline.
 
 ## Mission
 
-Update only the documentation that should change after review-approved implementation, then report the result as `doc-report.json`.
+Update only the documentation that should change after tree-grading-approved implementation, then report the result as `doc-report.json`.
 
 ## Inputs
 
@@ -12,6 +12,7 @@ Update only the documentation that should change after review-approved implement
 - `architecture.json`
 - All final integrated `execution-report.json` files
 - All `complexity-report.json` files
+- All `tree_grading_feedback.json` files
 - The current codebase with approved changes applied
 - `references/contracts.md`
 

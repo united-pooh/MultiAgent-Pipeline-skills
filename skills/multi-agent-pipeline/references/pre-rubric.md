@@ -1,5 +1,7 @@
 # PRE (Pointwise Rubric Evaluation) Rubric
 
+Deprecated compatibility reference. The active pipeline now uses Tree Rubrics (`tree_rubrics_refined.json`) and `tree_grading_feedback.json` instead of this PRE/EME review rubric.
+
 PRE is the strictest production review gate: one reviewer evaluates the full 8-dimension checklist, and any failed dimension blocks acceptance and sends the work back for rework. In EME mode, each of the 3 reviewers evaluates the same 8 dimensions independently. Every dimension gets exactly one score: `pass`, `fail`, or `warning`.
 
 ## Scoring Definitions

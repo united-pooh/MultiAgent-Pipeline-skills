@@ -266,31 +266,27 @@ User request:
 }
 ```
 
-### `review_individual_1.json`
+### `tree_grading_feedback.json`
 
 ```json
 {
   "version": "1.0",
-  "reviewer_id": 1,
-  "applied_skills": ["ce-frontend-design"],
-  "pre_results": [
-    {
-      "criterion": "Correctness",
-      "score": "pass",
-      "evidence": "Responsive navigation and header hierarchy changes match REQ-001 and REQ-002 in src/layout/DashboardShell.tsx:12 and src/pages/DashboardPage.tsx:8.",
-      "suggestion": null
-    }
-  ],
-  "frontend_design_assessment": {
-    "system_fit": "pass",
-    "interaction_quality": "pass",
-    "ui_accessibility": "warning",
-    "verification_method": "Playwright screenshot + code inspection",
-    "notes": [
-      "Visual system stays aligned with existing spacing and color tokens.",
-      "Add a stronger visible focus ring on the mobile nav toggle."
-    ]
-  }
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "task_id": "GROUP-1-task",
+  "threshold": 0.8,
+  "require_depth_one_pass": true,
+  "verdict": "pass",
+  "weighted_score": 0.875,
+  "pass_rate": 0.8,
+  "num_branches": 3,
+  "max_depth": 3,
+  "nodes_passed": ["B1-D1-01", "B1-D2-01"],
+  "nodes_failed": ["B2-D3-01"],
+  "blocking_nodes": [],
+  "non_blocking_nodes": ["B2-D3-01"],
+  "node_results": [],
+  "summary": "Tree grading passed with weighted_score 0.875."
 }
 ```
 
@@ -367,12 +363,6 @@ User request:
       "required_skills": ["ce-frontend-design"],
       "applied_skills": ["ce-frontend-design"],
       "issues": []
-    },
-    {
-      "scope": "GROUP-1/review",
-      "required_skills": ["ce-frontend-design"],
-      "applied_skills": ["ce-frontend-design"],
-      "issues": []
     }
   ],
   "readability_conclusion": "high",
@@ -409,12 +399,6 @@ User request:
       "required_skills": ["ce-frontend-design"],
       "applied_skills": ["ce-frontend-design"],
       "issues": []
-    },
-    {
-      "scope": "GROUP-1/review",
-      "required_skills": ["ce-frontend-design"],
-      "applied_skills": ["ce-frontend-design"],
-      "issues": []
     }
   ],
   "merge_summary": {
@@ -445,6 +429,14 @@ User request:
       "max_total_points": 0
     }
   ],
+  "tree_grading_summary": [
+    {
+      "group_id": "GROUP-1",
+      "verdict": "pass",
+      "weighted_score": 0.875,
+      "nodes_failed": ["B2-D3-01"]
+    }
+  ],
   "cleanup_summary": {
     "deleted_workspace": true,
     "deleted_paths": [".pipeline-workspace"],
@@ -455,5 +447,5 @@ User request:
 
 ## Notes
 
-- A real run may contain multiple reviewer outputs, multiple merge iterations, or a `pause_for_human` branch with `conflict-resolution.json`.
+- A real run may contain multiple grader outputs, multiple merge iterations, or a `pause_for_human` branch with `conflict-resolution.json`.
 - When merge pauses, `.pipeline-last-run-summary.json` may still be written, but `.pipeline-workspace/` must stay intact until the run is resolved or rejected.

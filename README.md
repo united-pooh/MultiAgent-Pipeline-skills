@@ -1,6 +1,6 @@
 # 多智能体流水线
 
-`multi-agent-pipeline` 是一套 Codex-first 的复杂开发任务流程。它把一件较大的工作拆成需求澄清、计划、架构、分派、实现、合并、验证、审查、QA、文档和最终评估，让每一步都有明确责任和可追踪产物。
+`multi-agent-pipeline` 是一套 Codex-first 的复杂开发任务流程。它把较大的工作拆成需求、计划、架构、分派、实现、合并、验证、Tree Rubrics 评分、QA、文档和最终评估，让每一步都有明确责任和可追踪产物。
 
 它适合新功能、跨文件重构、需要严格验证的改动，或你明确要求使用“流水线”“多智能体”“production workflow”的场景。小修小补、纯问答、单文件快速修改通常不需要走完整流水线。
 
@@ -16,13 +16,7 @@
 用多智能体流水线把登录模块改造成支持第三方账号登录
 ```
 
-也可以指定检查偏好：
-
-```text
-用 multi-agent-pipeline 做报表 CSV 导出，审查用 PRE
-```
-
-默认审查模式是 EME：三个独立 Review 子代理并行检查，然后聚合结果。
+默认质量门禁是 Tree Rubrics：先生成树状评测标准，再由 3 个独立评分员只基于最终输出文件逐节点评分。
 
 ## 流程一览
 
@@ -36,13 +30,14 @@ flowchart LR
     F --> G["Execution: 实现"]
     G --> H["Merge: 三向合并"]
     H --> I["Validation: 命令验证"]
-    I -->|通过或跳过| J["Review: 独立审查"]
+    I -->|通过或跳过| J["Tree Rubrics: 生成评测树"]
     I -->|失败| G
-    J -->|通过| K["QA: 场景验证"]
-    J -->|失败| G
-    K -->|通过| L["Doc: 文档"]
+    J --> K["Tree Grading: 最终文件评分"]
+    K -->|通过| L["QA: 场景验证"]
     K -->|失败| G
-    L --> M["Final Assessment: 最终评估"]
+    L -->|通过| M["Doc: 文档"]
+    L -->|失败| G
+    M --> N["Final Assessment: 最终评估"]
 ```
 
 ## 主要能力
@@ -54,8 +49,8 @@ flowchart LR
 | 分组实现 | Dispatch 按文件所有权和依赖拆分 worker group，减少并行冲突 |
 | 保守合并 | Merge 由 orchestrator 本地执行，使用三向合并语义，冲突时暂停给人处理 |
 | 多语言验证 | Validation 根据项目标记自动选择 Go、Python、JavaScript/TypeScript、Rust、Java、Ruby 的 fix/check 命令 |
-| 独立审查 | Review 支持 EME 三审或 PRE 单审，按 8 个质量维度给出证据 |
-| 场景 QA | QA 补充运行时和用户场景验证，不重复命令层验证 |
+| Tree Rubrics 评分 | 每个 group 生成分类、初版 rubric、验证结果和 refined rubric，再对最终输出文件评分 |
+| 端到端评分 | Tree Grading 只看 `spec`、`tree_rubrics_refined.json` 和 `final-output-files.json`，不看过程日志或 agent 行为 |
 | Codex pet 事件 | Runtime 会输出 `codex_pet_events`，把 pipeline 阶段映射到 `running`、`review`、`failed`、`waiting`、`waving` 等 Codex avatar state |
 
 ## 文件结构
@@ -70,7 +65,11 @@ skills/multi-agent-pipeline/
 │   ├── dispatch.md
 │   ├── execution.md
 │   ├── validation.md
-│   ├── review.md
+│   ├── tree-classification.md
+│   ├── tree-rubric-generation.md
+│   ├── tree-rubric-verification.md
+│   ├── tree-rubric-refinement.md
+│   ├── tree-grading.md
 │   ├── qa.md
 │   ├── doc.md
 │   └── final-assessment.md
@@ -87,8 +86,6 @@ skills/multi-agent-pipeline/
 
 ```text
 .pipeline-workspace/
-├── design.md
-├── spec.md
 ├── spec.json
 ├── plan.json
 ├── architecture.json
@@ -97,62 +94,35 @@ skills/multi-agent-pipeline/
 ├── complexity/
 ├── merge/
 ├── validation/
-├── review_history/
+├── tree_rubrics/
+├── final_outputs/
+├── grading_history/
 ├── qa/
 ├── assessment_history/
 └── logs/
 ```
 
-## 产物说明
+## Tree Rubrics 门禁
 
-| 产物 | 作用 |
+每个 worker group 合并并通过 Validation 后，流水线会运行四个 rubric 生成阶段：
+
+| 阶段 | 产物 |
 |---|---|
-| `design.md` | Brainstorming 后的目标、方案、约束和成功标准 |
-| `spec.md` | 给用户看的中文规格说明 |
-| `spec.json` | 给后续阶段使用的结构化需求 |
-| `plan.json` | 任务计划、依赖和风险 |
-| `architecture.json` | 代码分析、架构决策、文件级改动意图 |
-| `dispatch.json` | worker group、文件所有权、执行波次 |
-| `execution-report.json` | 每个工作组的实现报告 |
-| `complexity-report.json` | Execution 后对 changed Python 文件运行的认知复杂度报告，包含可读性高/低和复杂度高/低结论 |
-| `merge-report.json` | 合并结果或冲突记录 |
-| `validation-report.json` | 自动命令验证结果 |
-| `review_feedback.json` | Review 聚合结果 |
-| `qa-report.json` | 场景和运行时验证结果 |
-| `doc-report.json` | 文档更新结果 |
-| `final-assessment.json` | 最终验收或重启点判断 |
-| `codex_pet_events` | `.pipeline-last-run-summary.json` 内的 pet state 事件列表，可供支持 `::codex-pet{...}` 的宿主或事件桥消费 |
+| Classification | `classification.json` |
+| Generation | `tree_rubrics.json` |
+| Verification | `validation_result.json` |
+| Refinement | `tree_rubrics_refined.json` |
 
-## 检查机制
+随后 orchestrator 本地生成 `final-output-files.json`，范围是该 group 的 `changed_files ∪ owned_files`。3 个 grader 并行产出 `tree_grading_individual_N.json`，orchestrator 聚合为 `tree_grading_feedback.json`。
 
-Review 有两种模式：
+评分规则：
 
-| 模式 | 说明 |
+| 规则 | 说明 |
 |---|---|
-| PRE | 一个 reviewer 按 8 个维度严格审查，适合较小但要求极严的改动 |
-| EME | 三个 reviewer 独立审查并按维度多数投票，默认模式，适合复杂任务 |
-
-8 个维度包括正确性、安全性、性能、错误处理、代码质量、架构一致性、测试覆盖和向后兼容。
-
-## Codex Pet 状态事件
-
-运行时会在关键阶段记录 pet 状态事件：
-
-| 场景 | 状态 |
-|---|---|
-| 阶段执行中 | `running` |
-| Review / Final Assessment | `review` |
-| 验证或审查失败 | `failed` |
-| 合并冲突或等待人工处理 | `waiting` |
-| 最终接受 | `waving` |
-
-事件会写入 `.pipeline-workspace/logs/codex-pet-events.jsonl`。运行结束后，`.pipeline-last-run-summary.json` 会保留同一组 `codex_pet_events`。每个事件同时带有 `directive` 字段，例如：
-
-```text
-::codex-pet{state="review" durationMs=2400 scope="pipeline.review.group-group-1.iteration-1"}
-```
-
-当前仓库定义的是 skill/runtime 侧协议；Codex Desktop 或其他宿主如果支持该 directive，可以把它桥接到 avatar state。
+| 节点评分 | 每个节点由 3 个 grader 多数投票得到 0/1 |
+| 深度权重 | depth 1 权重 1，depth 2 权重 2，depth 3+ 权重 3 |
+| 依赖链 | 同一 branch 内浅层节点失败时，更深层节点 effective score 自动为 0 |
+| 通过门槛 | `weighted_score >= 0.80` 且所有 depth 1 节点通过 |
 
 ## 安装到 Codex
 
