@@ -1,7 +1,7 @@
 # Pipeline Stages
 
-This file is the detailed phase guide for the multi-agent production pipeline.
-The main `SKILL.md` keeps only the map and hard gates.
+This file is the detailed phase guide for the active multi-agent production
+pipeline. The main `SKILL.md` keeps only the map and hard gates.
 
 ## 0. Brainstorming
 
@@ -15,25 +15,9 @@ Goal:
 - Propose viable approaches with tradeoffs when the design choice is still open.
 - Write the approved or user-implied design to `.pipeline-workspace/design.md`.
 
-`design.md` format:
-
-```markdown
-## Objective
-[What is being built and why]
-
-## Chosen Approach
-[Chosen approach and brief rationale]
-
-## Constraints
-[Technical or business constraints]
-
-## Success Criteria
-[Concrete, testable done criteria]
-```
-
 If the user asks to brainstorm or choose a design, ask for approval before
-proceeding. If the user already supplied a concrete task and explicitly asked
-for execution, record that request as the approved design and continue.
+proceeding. If the user supplied a concrete task and explicitly asked for
+execution, record that request as the approved design and continue.
 
 ## 1. Spec
 
@@ -52,7 +36,7 @@ Rules:
 - Record `applied_skills: ["superpowers"]`.
 - Attach `superpowers` and restrict it to brainstorming/planning discipline.
 - Do not allow build, TDD, commit, or finish-branch behaviors from
-  `superpowers` in this stage.
+  `superpowers`.
 
 ## 2. Plan
 
@@ -112,15 +96,6 @@ Rules:
 
 For each execution wave, spawn one Execution `worker` per ready group.
 
-Inputs:
-
-- `spec.json`
-- `plan.json`
-- `architecture.json`
-- the assigned worker group
-- current `base_ref`
-- latest group-specific `review_feedback.json` on retries
-
 Rules:
 
 - The worker owns only its declared files plus adjacent tests/docs required to
@@ -162,49 +137,76 @@ Rules:
 - Human conflict resolution produces `conflict-resolution.json`.
 - Resume from Merge after conflict resolution. Do not rerun Dispatch.
 
-## 7. Validation And Review
+## 7. Validation
 
-Run Validation before Review for every successfully merged worker group.
+Run Validation before Tree Rubrics for every successfully merged worker group.
 
-Validation:
+Rules:
 
 - Spawn a Validation `worker` with the group's execution, complexity, and merge
   reports plus repo root.
 - Detect language and run the fix/check layers in `agents/validation.md`.
 - Write `validation-report.json`.
 - Failed or errored validation routes back to Execution.
-- Passed or skipped validation continues to Review.
+- Passed or skipped validation continues to Tree Rubrics.
 - Any fix-layer file edits become part of the current merged main-workspace
-  result before Review.
+  result before Tree Rubrics.
 
-Review:
+## 8. Tree Rubrics
 
-- Evaluate the merged main-workspace result, not the worker fork directly.
-- Treat `complexity-report.json` as evidence for Code Quality and Architecture
-  Compliance.
-- Default `EME`: spawn three independent reviewers and aggregate by PRE
-  dimension majority vote.
-- `PRE`: spawn one reviewer and convert the single result directly into
-  `review_feedback.json`.
-- `warning` counts as pass for majority voting; preserve warnings even when the
-  verdict is pass.
-- Failed dimensions route the group back to Execution.
+After Validation passes or is skipped, run the Tree Rubrics sequence for the
+worker group.
 
-## 8. QA
+Stages:
 
-After Review passes, spawn a QA `worker` for the group.
+- Tree Classification: `agents/tree-classification.md` produces
+  `classification.json`.
+- Tree Rubric Generation: `agents/tree-rubric-generation.md` produces
+  `tree_rubrics.json`.
+- Tree Rubric Verification: `agents/tree-rubric-verification.md` produces
+  `validation_result.json`.
+- Tree Rubric Refinement: `agents/tree-rubric-refinement.md` produces
+  `tree_rubrics_refined.json`.
 
 Rules:
 
-- QA validates runtime or scenario behavior that command Validation and static
-  Review cannot cover.
+- The rubric must stay tied to the worker group's spec and final output files.
+- Verification checks rubric quality, not implementation quality.
+- Refinement incorporates verification feedback before grading starts.
+
+## 9. Final Output Files And Tree Grading
+
+The orchestrator locally builds `final-output-files.json` from the group's
+`changed_files` and owned files, then spawns 3 independent Tree Grading
+subagents with `agents/tree-grading.md`.
+
+Rules:
+
+- Graders evaluate only `spec`, `tree_rubrics_refined.json`, and
+  `final-output-files.json`.
+- Graders must not grade process logs, agent behavior, or intermediate
+  execution history.
+- The orchestrator aggregates grader outputs into `tree_grading_feedback.json`.
+- A group passes grading when `weighted_score >= 0.80` and all depth-1 rubric
+  nodes pass.
+- Failed grading routes the group back to Execution with feedback.
+
+## 10. QA
+
+After Tree Grading passes, spawn a QA `worker` for the group.
+
+Rules:
+
+- QA validates runtime or scenario behavior that command Validation and Tree
+  Grading cannot cover.
 - Write `qa-report.json`.
 - QA is read-only with respect to integrated source changes.
-- A group is cleanup-eligible only after Review and QA both pass.
+- A group is cleanup-eligible only after Tree Grading and QA both pass.
 
-## 9. Documentation
+## 11. Documentation
 
-After every worker group passes Validation, Review, and QA, spawn a Doc worker.
+After every worker group passes Validation, Tree Grading, and QA, spawn a Doc
+worker.
 
 Rules:
 
@@ -214,7 +216,7 @@ Rules:
 - Return `doc-report.json`.
 - The orchestrator reviews and integrates doc changes before final assessment.
 
-## 10. Final Assessment
+## 12. Final Assessment
 
 Spawn Final Assessment with the complete artifact set.
 
@@ -228,7 +230,7 @@ Rules:
 - Use `restart_from = "merge"` when the blocking issue originates in merge or
   conflict resolution rather than implementation.
 
-## 11. Cleanup
+## 13. Cleanup
 
 Cleanup is orchestrator-local. Do not spawn a subagent.
 
@@ -239,4 +241,10 @@ Rules:
 - On reject or pause, preserve `.pipeline-workspace/`.
 - Never delete integrated code, tests, docs, release notes, or user-retained
   files as part of cleanup.
+
+## Legacy Review
+
+`agents/review.md` and `references/pre-rubric.md` remain for compatibility with
+older PRE/EME runs. Do not use them as the default quality gate in the active
+pipeline.
 

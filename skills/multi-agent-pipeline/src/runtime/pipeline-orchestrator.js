@@ -1,8 +1,14 @@
+import fs from "node:fs/promises";
 import path from "node:path";
 
 import { ArtifactStore } from "./artifact-store.js";
 import { runComplexityHook } from "./complexity-hook.js";
-import { DEFAULT_REVIEW_MODE } from "./constants.js";
+import {
+  DEFAULT_GRADER_COUNT,
+  DEFAULT_GRADING_THRESHOLD,
+  DEFAULT_REQUIRE_DEPTH_ONE_PASS,
+  DEFAULT_REVIEW_MODE,
+} from "./constants.js";
 import { extractSingleJsonBlock, validateArtifact } from "./contracts.js";
 import {
   ContractValidationError,
@@ -12,8 +18,8 @@ import {
 } from "./errors.js";
 import { MergeEngine } from "./merge-engine.js";
 import { createCodexPetEvent } from "./pet-events.js";
-import { aggregateReviewFeedback } from "./review-feedback.js";
 import { loadStageCatalog } from "./stage-catalog.js";
+import { aggregateTreeGradingFeedback } from "./tree-grading.js";
 import { nowIso, sanitizeForPath, uniqueStrings } from "./utils.js";
 
 function artifactTypeForStage(stage) {
@@ -26,6 +32,16 @@ function artifactTypeForStage(stage) {
       return stage === "doc" ? "doc-report" : stage;
     case "final-assessment":
       return "final-assessment";
+    case "tree-classification":
+      return "tree-classification";
+    case "tree-rubric-generation":
+      return "tree-rubrics";
+    case "tree-rubric-verification":
+      return "tree-rubric-verification";
+    case "tree-rubric-refinement":
+      return "tree-rubrics-refined";
+    case "tree-grading":
+      return "tree-grading-individual";
     case "review":
       return "review-individual";
     case "execution":
@@ -40,7 +56,7 @@ function artifactTypeForStage(stage) {
 }
 
 function petStateForStage(stage) {
-  if (stage === "review" || stage === "final-assessment") {
+  if (stage === "review" || stage === "tree-grading" || stage === "final-assessment") {
     return "review";
   }
 
@@ -81,13 +97,14 @@ function buildEmptyGroupState(workerGroup) {
     complexityHistory: [],
     mergeHistory: [],
     validationHistory: [],
-    reviewFeedbackHistory: [],
-    reviewerArtifacts: [],
+    treeGradingFeedbackHistory: [],
+    treeGraderArtifacts: [],
     finalExecution: null,
     finalComplexity: null,
     finalMerge: null,
     finalValidation: null,
-    finalReviewFeedback: null,
+    finalTreeGradingFeedback: null,
+    finalOutputFiles: null,
     qaResult: null,
   };
 }
@@ -104,12 +121,12 @@ function latestComplexityEntry(state) {
   return state.finalComplexity ?? latestEntry(state.complexityHistory);
 }
 
-function latestReviewEntry(state) {
-  return state.finalReviewFeedback ?? latestEntry(state.reviewFeedbackHistory);
+function latestTreeGradingEntry(state) {
+  return state.finalTreeGradingFeedback ?? latestEntry(state.treeGradingFeedbackHistory);
 }
 
-function hasReviewPass(state) {
-  return latestReviewEntry(state)?.artifact?.verdict === "pass";
+function hasTreeGradingPass(state) {
+  return latestTreeGradingEntry(state)?.artifact?.verdict === "pass";
 }
 
 function latestValidationEntry(state) {
@@ -124,8 +141,8 @@ function hasQaPass(state) {
   return state.qaResult?.artifact?.status === "pass";
 }
 
-function latestFailedReviewFeedback(state) {
-  const latestFeedback = latestReviewEntry(state)?.artifact ?? null;
+function latestFailedTreeGradingFeedback(state) {
+  const latestFeedback = latestTreeGradingEntry(state)?.artifact ?? null;
   return latestFeedback?.verdict === "fail" ? latestFeedback : null;
 }
 
@@ -139,13 +156,14 @@ function nextExecutionIteration(state) {
   const latestComplexityIteration = latestEntry(state.complexityHistory)?.artifact?.iteration ?? 0;
   const latestMergeIteration = latestEntry(state.mergeHistory)?.artifact?.iteration ?? 0;
   const latestValidationIteration = latestEntry(state.validationHistory)?.artifact?.iteration ?? 0;
-  const latestReviewIteration = latestEntry(state.reviewFeedbackHistory)?.artifact?.iteration ?? 0;
+  const latestTreeGradingIteration =
+    latestEntry(state.treeGradingFeedbackHistory)?.artifact?.iteration ?? 0;
   return Math.max(
     latestExecutionIteration,
     latestComplexityIteration,
     latestMergeIteration,
     latestValidationIteration,
-    latestReviewIteration,
+    latestTreeGradingIteration,
   ) + 1;
 }
 
@@ -160,9 +178,9 @@ function findComplexityForIteration(state, iteration) {
   return null;
 }
 
-function findReviewFeedbackForIteration(state, iteration) {
-  for (let index = state.reviewFeedbackHistory.length - 1; index >= 0; index -= 1) {
-    const entry = state.reviewFeedbackHistory[index];
+function findTreeGradingFeedbackForIteration(state, iteration) {
+  for (let index = state.treeGradingFeedbackHistory.length - 1; index >= 0; index -= 1) {
+    const entry = state.treeGradingFeedbackHistory[index];
     if (entry.artifact.iteration === iteration) {
       return entry;
     }
@@ -218,21 +236,11 @@ function buildSkillUsageSummary({ spec, plan, dispatch, groupStates, finalAssess
 
     const state = groupStates.get(group.group_id);
     const executionSkills = state?.finalExecution?.artifact?.applied_skills ?? [];
-    const reviewSkills = uniqueStrings(
-      (state?.reviewerArtifacts ?? []).flatMap((artifact) => artifact.applied_skills ?? []),
-    );
-
     summary.push({
       scope: `${group.group_id}/execution`,
       required_skills: group.required_skills,
       applied_skills: executionSkills,
       issues: skillIssues(group.required_skills, executionSkills),
-    });
-    summary.push({
-      scope: `${group.group_id}/review`,
-      required_skills: group.required_skills,
-      applied_skills: reviewSkills,
-      issues: skillIssues(group.required_skills, reviewSkills),
     });
   });
 
@@ -297,6 +305,17 @@ function buildRunSummary({
           max_total_points: entry.artifact.max_total_points,
         };
       }),
+    tree_grading_summary: states
+      .filter((state) => latestTreeGradingEntry(state))
+      .map((state) => {
+        const entry = latestTreeGradingEntry(state);
+        return {
+          group_id: state.workerGroup.group_id,
+          verdict: entry.artifact.verdict,
+          weighted_score: entry.artifact.weighted_score,
+          nodes_failed: entry.artifact.nodes_failed,
+        };
+      }),
     cleanup_summary: {
       deleted_workspace: deletedWorkspace,
       deleted_paths: deletedWorkspace ? [".pipeline-workspace"] : [],
@@ -311,6 +330,9 @@ export class PipelineOrchestrator {
     repoRoot,
     stageRunner,
     reviewMode = DEFAULT_REVIEW_MODE,
+    graderCount = DEFAULT_GRADER_COUNT,
+    gradingThreshold = DEFAULT_GRADING_THRESHOLD,
+    requireDepthOnePass = DEFAULT_REQUIRE_DEPTH_ONE_PASS,
     maxStageRetries = 2,
     clock = () => new Date(),
     artifactStore = null,
@@ -329,6 +351,9 @@ export class PipelineOrchestrator {
     this.repoRoot = repoRoot;
     this.stageRunner = stageRunner;
     this.reviewMode = reviewMode;
+    this.graderCount = graderCount;
+    this.gradingThreshold = gradingThreshold;
+    this.requireDepthOnePass = requireDepthOnePass;
     this.maxStageRetries = maxStageRetries;
     this.clock = clock;
     this.artifactStore = artifactStore ?? new ArtifactStore({ repoRoot, clock });
@@ -515,21 +540,21 @@ export class PipelineOrchestrator {
       state.complexityHistory = await this.artifactStore.readGroupComplexityReports(workerGroup.group_id);
       state.mergeHistory = await this.artifactStore.readGroupMergeHistory(workerGroup.group_id);
       state.validationHistory = await this.artifactStore.readGroupValidationReports(workerGroup.group_id);
-      state.reviewFeedbackHistory = await this.artifactStore.readGroupReviewFeedbackHistory(
+      state.treeGradingFeedbackHistory = await this.artifactStore.readGroupTreeGradingFeedbackHistory(
         workerGroup.group_id,
       );
       state.finalExecution = latestEntry(state.executionHistory);
       state.finalComplexity = latestEntry(state.complexityHistory);
       state.finalMerge = latestEntry(state.mergeHistory);
       state.finalValidation = latestEntry(state.validationHistory);
-      state.finalReviewFeedback = latestEntry(state.reviewFeedbackHistory);
+      state.finalTreeGradingFeedback = latestEntry(state.treeGradingFeedbackHistory);
       state.qaResult = latestEntry(await this.artifactStore.readGroupQaReports(workerGroup.group_id));
 
-      const latestReviewIteration = state.finalReviewFeedback?.artifact?.iteration ?? null;
-      state.reviewerArtifacts = latestReviewIteration === null
+      const latestTreeGradingIteration = state.finalTreeGradingFeedback?.artifact?.iteration ?? null;
+      state.treeGraderArtifacts = latestTreeGradingIteration === null
         ? []
-        : (await this.artifactStore.readGroupReviewerOutputs(workerGroup.group_id, {
-            iteration: latestReviewIteration,
+        : (await this.artifactStore.readGroupTreeGraderOutputs(workerGroup.group_id, {
+            iteration: latestTreeGradingIteration,
           })).map((entry) => entry.artifact);
 
       groupStates.set(workerGroup.group_id, state);
@@ -550,10 +575,10 @@ export class PipelineOrchestrator {
         return state;
       });
 
-      while (waveStates.some((state) => !hasReviewPass(state))) {
+      while (waveStates.some((state) => !hasTreeGradingPass(state))) {
         const executionRuns = await Promise.all(
           waveStates
-            .filter((state) => !hasReviewPass(state))
+            .filter((state) => !hasTreeGradingPass(state))
             .map((state) =>
               this.runExecutionPass({
                 spec,
@@ -577,7 +602,7 @@ export class PipelineOrchestrator {
             continue;
           }
 
-          await this.integrateAndReviewExecutionPass({
+          await this.integrateAndGradeExecutionPass({
             spec,
             architecture,
             groupState: executionRun.groupState,
@@ -597,7 +622,7 @@ export class PipelineOrchestrator {
               executionResult: state.finalExecution,
               validationResult: state.finalValidation,
               mergeResult: state.finalMerge,
-              reviewFeedback: state.finalReviewFeedback,
+              treeGradingFeedback: state.finalTreeGradingFeedback,
               complexityResult: state.finalComplexity,
             }),
           ),
@@ -653,8 +678,8 @@ export class PipelineOrchestrator {
         state.complexityHistory.map((entry) => entry.artifact),
       ),
       conflictResolutions,
-      reviewFeedbacks: [...groupStates.values()].flatMap((state) =>
-        state.reviewFeedbackHistory.map((entry) => entry.artifact),
+      treeGradingFeedbacks: [...groupStates.values()].flatMap((state) =>
+        state.treeGradingFeedbackHistory.map((entry) => entry.artifact),
       ),
       qaReports: [...groupStates.values()]
         .filter((state) => state.qaResult)
@@ -775,7 +800,10 @@ export class PipelineOrchestrator {
           state: petStateForStage(stage),
           reason: `${stage} stage started${attempt > 1 ? ` retry ${attempt}` : ""}.`,
           scope: petScopeForStage(stage, context),
-          durationMs: stage === "review" || stage === "final-assessment" ? 2400 : 1800,
+          durationMs:
+            stage === "review" || stage === "tree-grading" || stage === "final-assessment"
+              ? 2400
+              : 1800,
         });
         const request = await this.stageCatalog.buildStageRequest(stage, {
           ...context,
@@ -848,7 +876,7 @@ export class PipelineOrchestrator {
         workerGroup: groupState.workerGroup,
         baseRef,
         iteration,
-        reviewFeedback: latestFailedReviewFeedback(groupState),
+        treeGradingFeedback: latestFailedTreeGradingFeedback(groupState),
         validationReport: latestFailedValidationReport(groupState),
       },
       {
@@ -922,7 +950,7 @@ export class PipelineOrchestrator {
     };
   }
 
-  async integrateAndReviewExecutionPass({ spec, architecture, groupState, executionRun }) {
+  async integrateAndGradeExecutionPass({ spec, architecture, groupState, executionRun }) {
     const mergeOutcome = await this.mergeEngine.mergeProposal({
       groupId: groupState.workerGroup.group_id,
       iteration: executionRun.iteration,
@@ -979,25 +1007,23 @@ export class PipelineOrchestrator {
       return;
     }
 
-    const reviewResult = await this.runReviewStage({
+    const gradingResult = await this.runTreeRubricsAndGradingStage({
       spec,
       architecture,
       workerGroup: groupState.workerGroup,
       executionResult: executionRun.executionResult,
-      complexityResult: executionRun.complexityResult,
-      mergeReport: mergeOutcome.report,
-      validationReport: validationResult.artifact,
       iteration: executionRun.iteration,
     });
-    groupState.reviewFeedbackHistory.push(reviewResult.feedback);
-    groupState.finalReviewFeedback = reviewResult.feedback;
-    groupState.reviewerArtifacts = reviewResult.reviewerArtifacts;
+    groupState.treeGradingFeedbackHistory.push(gradingResult.feedback);
+    groupState.finalTreeGradingFeedback = gradingResult.feedback;
+    groupState.treeGraderArtifacts = gradingResult.graderArtifacts;
+    groupState.finalOutputFiles = gradingResult.finalOutputFiles;
 
-    if (!hasReviewPass(groupState)) {
+    if (!hasTreeGradingPass(groupState)) {
       await this.emitPetEvent({
         state: "failed",
-        reason: `Review failed for ${groupState.workerGroup.group_id} iteration ${executionRun.iteration}.`,
-        scope: petScopeForStage("review", {
+        reason: `Tree grading failed for ${groupState.workerGroup.group_id} iteration ${executionRun.iteration}.`,
+        scope: petScopeForStage("tree-grading", {
           workerGroup: groupState.workerGroup,
           iteration: executionRun.iteration,
         }),
@@ -1036,9 +1062,9 @@ export class PipelineOrchestrator {
     mergeReport,
     conflictResolution,
   }) {
-    const existingReview = findReviewFeedbackForIteration(groupState, mergeReport.iteration);
-    if (existingReview) {
-      groupState.finalReviewFeedback = existingReview;
+    const existingGrading = findTreeGradingFeedbackForIteration(groupState, mergeReport.iteration);
+    if (existingGrading) {
+      groupState.finalTreeGradingFeedback = existingGrading;
       return;
     }
 
@@ -1130,26 +1156,23 @@ export class PipelineOrchestrator {
       return;
     }
 
-    const reviewResult = await this.runReviewStage({
+    const gradingResult = await this.runTreeRubricsAndGradingStage({
       spec,
       architecture,
       workerGroup: groupState.workerGroup,
       executionResult: executionEntry,
-      complexityResult: complexityEntry,
-      mergeReport: resolvedMergeEntry.artifact,
-      validationReport: validationEntry.artifact,
       iteration: mergeReport.iteration,
-      conflictResolution: conflictResolution.artifact,
     });
-    groupState.reviewFeedbackHistory.push(reviewResult.feedback);
-    groupState.finalReviewFeedback = reviewResult.feedback;
-    groupState.reviewerArtifacts = reviewResult.reviewerArtifacts;
+    groupState.treeGradingFeedbackHistory.push(gradingResult.feedback);
+    groupState.finalTreeGradingFeedback = gradingResult.feedback;
+    groupState.treeGraderArtifacts = gradingResult.graderArtifacts;
+    groupState.finalOutputFiles = gradingResult.finalOutputFiles;
 
-    if (!hasReviewPass(groupState)) {
+    if (!hasTreeGradingPass(groupState)) {
       await this.emitPetEvent({
         state: "failed",
-        reason: `Review failed after conflict resolution for ${groupState.workerGroup.group_id}.`,
-        scope: petScopeForStage("review", {
+        reason: `Tree grading failed after conflict resolution for ${groupState.workerGroup.group_id}.`,
+        scope: petScopeForStage("tree-grading", {
           workerGroup: groupState.workerGroup,
           iteration: mergeReport.iteration,
         }),
@@ -1158,69 +1181,195 @@ export class PipelineOrchestrator {
     }
   }
 
-  async runReviewStage({
-    spec,
-    architecture,
-    workerGroup,
-    executionResult,
-    complexityResult = null,
-    mergeReport,
-    validationReport,
-    iteration,
-    conflictResolution = null,
-  }) {
-    const reviewerCount = this.reviewMode === "PRE" ? 1 : 3;
-    const reviewRuns = await Promise.all(
-      Array.from({ length: reviewerCount }, (_, index) =>
+  async createFinalOutputFiles({ workerGroup, executionResult, iteration }) {
+    const outputPaths = uniqueStrings([
+      ...(executionResult.artifact.changed_files ?? []),
+      ...(workerGroup.owned_files ?? []),
+    ]).sort();
+    const files = [];
+
+    for (const filePath of outputPaths) {
+      const absolutePath = path.resolve(this.repoRoot, filePath);
+      const repoRootWithSeparator = `${path.resolve(this.repoRoot)}${path.sep}`;
+      if (!absolutePath.startsWith(repoRootWithSeparator)) {
+        files.push({
+          path: filePath,
+          status: "deleted",
+          content: null,
+        });
+        continue;
+      }
+
+      try {
+        const stat = await fs.stat(absolutePath);
+        const content = stat.isDirectory()
+          ? "[directory omitted from final output snapshot]"
+          : await fs.readFile(absolutePath, "utf8");
+        files.push({
+          path: filePath,
+          status: "present",
+          content,
+        });
+      } catch (error) {
+        if (error?.code !== "ENOENT") {
+          throw error;
+        }
+
+        files.push({
+          path: filePath,
+          status: "deleted",
+          content: null,
+        });
+      }
+    }
+
+    const artifact = validateArtifact("final-output-files", {
+      version: "1.0",
+      group_id: workerGroup.group_id,
+      iteration,
+      files,
+    }, { workerGroup });
+    const ref = await this.artifactStore.writeFinalOutputFiles(
+      workerGroup.group_id,
+      iteration,
+      artifact,
+    );
+
+    return {
+      artifact,
+      ref,
+    };
+  }
+
+  async runTreeRubricsAndGradingStage({ spec, architecture, workerGroup, executionResult, iteration }) {
+    const classification = await this.runStage(
+      "tree-classification",
+      {
+        spec,
+        architecture,
+        workerGroup,
+        iteration,
+      },
+      { workerGroup },
+    );
+    const classificationRef = await this.artifactStore.writeTreeClassification(
+      workerGroup.group_id,
+      iteration,
+      classification.artifact,
+    );
+
+    const treeRubrics = await this.runStage(
+      "tree-rubric-generation",
+      {
+        spec,
+        architecture,
+        workerGroup,
+        classification: classification.artifact,
+        iteration,
+      },
+      { workerGroup },
+    );
+    const treeRubricsRef = await this.artifactStore.writeTreeRubrics(
+      workerGroup.group_id,
+      iteration,
+      treeRubrics.artifact,
+    );
+
+    const verification = await this.runStage(
+      "tree-rubric-verification",
+      {
+        spec,
+        workerGroup,
+        classification: classification.artifact,
+        treeRubrics: treeRubrics.artifact,
+        iteration,
+      },
+      { workerGroup },
+    );
+    const verificationRef = await this.artifactStore.writeTreeRubricVerification(
+      workerGroup.group_id,
+      iteration,
+      verification.artifact,
+    );
+
+    const refinedRubrics = await this.runStage(
+      "tree-rubric-refinement",
+      {
+        spec,
+        workerGroup,
+        classification: classification.artifact,
+        treeRubrics: treeRubrics.artifact,
+        validationResult: verification.artifact,
+        iteration,
+      },
+      { workerGroup },
+    );
+    const refinedRubricsRef = await this.artifactStore.writeRefinedTreeRubrics(
+      workerGroup.group_id,
+      iteration,
+      refinedRubrics.artifact,
+    );
+
+    const finalOutputFiles = await this.createFinalOutputFiles({
+      workerGroup,
+      executionResult,
+      iteration,
+    });
+
+    const graderRuns = await Promise.all(
+      Array.from({ length: this.graderCount }, (_, index) =>
         this.runStage(
-          "review",
+          "tree-grading",
           {
             spec,
-            architecture,
             workerGroup,
-            executionReport: executionResult.artifact,
-            complexityReport: complexityResult?.artifact ?? null,
-            mergeReport,
-            validationReport,
-            conflictResolution,
-            reviewerId: index + 1,
+            treeRubrics: refinedRubrics.artifact,
+            finalOutputFiles: finalOutputFiles.artifact,
+            graderId: index + 1,
             iteration,
-            reviewMode: this.reviewMode,
           },
           {
-            requiredSkills: workerGroup.required_skills,
+            rubric: refinedRubrics.artifact,
+            finalOutputFiles: finalOutputFiles.artifact,
           },
         ),
       ),
     );
 
-    const reviewerArtifacts = [];
-    for (const reviewRun of reviewRuns) {
-      const reviewerRef = await this.artifactStore.writeReviewerOutput(
+    const graderArtifacts = [];
+    for (const graderRun of graderRuns) {
+      const graderRef = await this.artifactStore.writeTreeGraderOutput(
         workerGroup.group_id,
         iteration,
-        reviewRun.artifact.reviewer_id,
-        reviewRun.artifact,
+        graderRun.artifact.grader_id,
+        graderRun.artifact,
       );
-      reviewerArtifacts.push({
-        ...reviewRun.artifact,
-        ref: reviewerRef,
+      graderArtifacts.push({
+        ...graderRun.artifact,
+        ref: graderRef,
       });
     }
 
-    const feedbackArtifact = aggregateReviewFeedback({
-      mode: this.reviewMode,
+    const feedbackArtifact = aggregateTreeGradingFeedback({
+      threshold: this.gradingThreshold,
+      requireDepthOnePass: this.requireDepthOnePass,
+      rubric: refinedRubrics.artifact,
+      graderResults: graderRuns.map((graderRun) => graderRun.artifact),
       iteration,
-      reviews: reviewRuns.map((reviewRun) => reviewRun.artifact),
     });
-    const feedbackRef = await this.artifactStore.writeReviewFeedback(
+    const feedbackRef = await this.artifactStore.writeTreeGradingFeedback(
       workerGroup.group_id,
       iteration,
       feedbackArtifact,
     );
 
     return {
-      reviewerArtifacts,
+      classification: { ...classification, ref: classificationRef },
+      treeRubrics: { ...treeRubrics, ref: treeRubricsRef },
+      verification: { ...verification, ref: verificationRef },
+      refinedRubrics: { ...refinedRubrics, ref: refinedRubricsRef },
+      finalOutputFiles,
+      graderArtifacts,
       feedback: {
         artifact: feedbackArtifact,
         ref: feedbackRef,
@@ -1270,7 +1419,7 @@ export class PipelineOrchestrator {
     executionResult,
     validationResult,
     mergeResult,
-    reviewFeedback,
+    treeGradingFeedback,
     complexityResult = null,
   }) {
     const qaResult = await this.runStage("qa", {
@@ -1281,7 +1430,7 @@ export class PipelineOrchestrator {
       complexityReport: complexityResult?.artifact ?? null,
       validationReport: validationResult.artifact,
       mergeReport: mergeResult.artifact,
-      reviewFeedback: reviewFeedback.artifact,
+      treeGradingFeedback: treeGradingFeedback.artifact,
       iteration: executionResult.artifact.iteration,
     });
     const ref = await this.artifactStore.writeQaReport(
@@ -1352,7 +1501,7 @@ export class PipelineOrchestrator {
     validationReports,
     complexityReports,
     conflictResolutions,
-    reviewFeedbacks,
+    treeGradingFeedbacks,
     qaReports,
     docReport,
     previousAssessments,
@@ -1367,7 +1516,7 @@ export class PipelineOrchestrator {
       validationReports,
       complexityReports,
       conflictResolutions,
-      reviewFeedbacks,
+      treeGradingFeedbacks,
       qaReports,
       docReport,
       previousAssessments,

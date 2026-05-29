@@ -479,7 +479,201 @@ Consumed by: **Final Assessment Agent**, **Orchestrator**
 
 ---
 
+## classification.json
+
+Produced by: **Tree Classification Agent**
+Consumed by: **Tree Rubric Generation Agent**, **Tree Rubric Refinement Agent**, **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "task_id": "GROUP-1-task",
+  "group_id": "GROUP-1",
+  "task_type": "code_implementation",
+  "depth_enhancement_applicable": true,
+  "recommended_branches": [
+    {
+      "name": "功能正确性",
+      "name_en": "Correctness",
+      "rationale": "Why this branch is independent and useful"
+    }
+  ],
+  "summary": "string"
+}
+```
+
+---
+
+## tree_rubrics.json and tree_rubrics_refined.json
+
+Produced by: **Tree Rubric Generation Agent** and **Tree Rubric Refinement Agent**
+Consumed by: **Tree Rubric Verification Agent**, **Tree Grading Agent**, **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "task_id": "GROUP-1-task",
+  "group_id": "GROUP-1",
+  "task_type": "code_implementation",
+  "branches": [
+    {
+      "name": "分支名称",
+      "name_en": "Branch Name",
+      "nodes": [
+        {
+          "depth": 1,
+          "id": "B1-D1-01",
+          "content": "Node criterion decidable from final output files",
+          "source": "KEEP_01 | MERGE_01_02 | ADD | DECOMPOSE_from_01 | DEEPEN",
+          "requirement_ids": ["REQ-001"],
+          "output_file_hints": ["src/app.js"]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- Node IDs must match `B{branch}-D{depth}-{seq}` and branch/depth numbers must match their position and `depth`.
+- Depth weights are fixed by the orchestrator: `depth=1 -> 1`, `depth=2 -> 2`, `depth>=3 -> 3`.
+- Every node must be decidable from final output files only.
+
+---
+
+## validation_result.json
+
+Produced by: **Tree Rubric Verification Agent**
+Consumed by: **Tree Rubric Refinement Agent**, **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "task_id": "GROUP-1-task",
+  "group_id": "GROUP-1",
+  "status": "pass | fail",
+  "dimension_results": [
+    {
+      "dimension": "Core Criteria Preservation | Added Criteria Justification | Breadth And Depth Correctness | Depth Discrimination | Node Count And Coverage | End-To-End Compliance | Depth Enhancement Quality",
+      "status": "pass | fail | warning",
+      "evidence": "string",
+      "suggestion": "string | null"
+    }
+  ],
+  "required_changes": ["string"],
+  "summary": "string"
+}
+```
+
+---
+
+## final-output-files.json
+
+Produced by: **Orchestrator**
+Consumed by: **Tree Grading Agent**
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "files": [
+    {
+      "path": "src/app.js",
+      "status": "present | deleted",
+      "content": "string | null"
+    }
+  ]
+}
+```
+
+The orchestrator builds this from `execution-report.changed_files ∪ worker_group.owned_files`.
+
+---
+
+## tree_grading_individual_N.json
+
+Produced by: **Each Tree Grading Agent**
+Consumed by: **Orchestrator**
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "grader_id": 1,
+  "task_id": "GROUP-1-task",
+  "node_results": [
+    {
+      "node_id": "B1-D1-01",
+      "raw_score": 1,
+      "evidence": "src/app.js: evidence from final output file",
+      "failure_reason": null,
+      "suggestion": null
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- Score every node exactly once with `raw_score` `0` or `1`.
+- Evidence must cite a path from `final-output-files.json`.
+- Evidence must not reference process artifacts such as execution, validation, merge, complexity reports, logs, retries, or tool traces.
+
+---
+
+## tree_grading_feedback.json
+
+Produced by: **Orchestrator**
+Consumed by: **Execution Agent**, **QA Agent**, **Doc Agent**, **Final Assessment Agent**
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "task_id": "GROUP-1-task",
+  "threshold": 0.8,
+  "require_depth_one_pass": true,
+  "verdict": "pass | fail",
+  "weighted_score": 0.875,
+  "pass_rate": 0.8,
+  "num_branches": 3,
+  "max_depth": 3,
+  "nodes_passed": ["B1-D1-01"],
+  "nodes_failed": ["B1-D2-01"],
+  "blocking_nodes": [],
+  "non_blocking_nodes": ["B1-D2-01"],
+  "node_results": [
+    {
+      "node_id": "B1-D1-01",
+      "branch": "Correctness",
+      "depth": 1,
+      "weight": 1,
+      "grader_scores": [],
+      "raw_score": 1,
+      "effective_score": 1,
+      "dependency_blocked_by": null,
+      "consensus": "unanimous | majority"
+    }
+  ],
+  "summary": "string"
+}
+```
+
+### Field Rules
+
+- The orchestrator majority-votes each node across the three graders.
+- A failed shallower node in the same branch sets deeper nodes' `effective_score` to `0`.
+- `verdict` is `pass` only when `weighted_score >= 0.80` and all depth-1 nodes pass.
+
+---
+
 ## Individual Reviewer Output: review_individual_N.json
+
+Deprecated: kept for compatibility with older PRE/EME review tooling. The pipeline now uses Tree Rubrics artifacts instead.
 
 Produced by: **Each Review Agent**
 Consumed by: **Orchestrator**
@@ -607,7 +801,7 @@ Consumed by: **Orchestrator**, **Review Agent**, **QA Agent**, **Final Assessmen
 - `test_summary`: Aggregate counts across all test commands. Set to zeroes if no test commands were run.
 - `blocking_failures`: Empty array when `status` is `passed`, `skipped`, or `error`. List individual failing test names or diagnostics when `status` is `failed`.
 - `detected_language`: The language detected from repo root marker files. Set to `unknown` when no marker file is found.
-- `status`: `passed` when all commands exit 0; `failed` when any check command exits non-zero; `error` when a fix command fails to run or compilation prevents test execution; `skipped` when `detected_language` is `unknown` — orchestrator treats `skipped` as a soft pass and proceeds to Review.
+- `status`: `passed` when all commands exit 0; `failed` when any check command exits non-zero; `error` when a fix command fails to run or compilation prevents test execution; `skipped` when `detected_language` is `unknown` — orchestrator treats `skipped` as a soft pass and proceeds to Tree Grading.
 - `commands_run[].type`: `fix` for commands that may write files (formatters, import sorters); `check` for read-only commands (tests, type checkers, linters that only report).
 
 ---
@@ -711,7 +905,7 @@ Consumed by: **Orchestrator**
   "restart_rationale": "string | null — why this restart point is correct",
   "skill_usage_summary": [
     {
-      "scope": "spec | plan | GROUP-1/execution | GROUP-1/review",
+      "scope": "spec | plan | GROUP-1/execution | GROUP-1/grading",
       "required_skills": ["superpowers"],
       "applied_skills": ["superpowers"],
       "issues": [
@@ -736,8 +930,8 @@ Consumed by: **Orchestrator**
 - `restart_from`: Must be `null` when `verdict` is `accept`. Must be one of `spec`, `plan`, `architecture`, `dispatch`, `merge`, or `execution` when `verdict` is `reject`.
 - `restart_rationale`: Must be `null` when `verdict` is `accept`. Must be non-null when `verdict` is `reject` and explain why the chosen restart stage is the earliest correct recovery point.
 - `skill_usage_summary`: Include at least Spec, Plan, and every worker-group stage that required a routed skill. Use `issues = []` when usage matched the requirement.
-- `readability_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final review evidence.
-- `complexity_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final review evidence.
+- `readability_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final grading evidence.
+- `complexity_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final grading evidence.
 - `complexity_summary`: Required. Cite the strongest complexity evidence and state whether readability/complexity affects delivery confidence.
 - `summary`: Required for every verdict and should stay within 2-3 sentences.
 
@@ -757,7 +951,7 @@ Consumed by: **Orchestrator**, **Humans**
   "restart_from": "spec | plan | architecture | dispatch | merge | execution | null",
   "skill_usage_summary": [
     {
-      "scope": "spec | plan | GROUP-1/execution | GROUP-1/review",
+      "scope": "spec | plan | GROUP-1/execution | GROUP-1/grading",
       "required_skills": ["superpowers"],
       "applied_skills": ["superpowers"],
       "issues": []
@@ -768,6 +962,14 @@ Consumed by: **Orchestrator**, **Humans**
     "conflicted_groups": [],
     "noop_groups": []
   },
+  "tree_grading_summary": [
+    {
+      "group_id": "GROUP-1",
+      "verdict": "pass | fail",
+      "weighted_score": 0.875,
+      "nodes_failed": ["B1-D2-01"]
+    }
+  ],
   "qa_summary": [
     {
       "group_id": "GROUP-1",
@@ -819,6 +1021,7 @@ Consumed by: **Orchestrator**, **Humans**
 - `cleanup_summary.deleted_workspace`: `true` only when cleanup deleted `.pipeline-workspace/`.
 - `validation_summary`: Include one entry for each worker group that reached Validation.
 - `complexity_summary`: Include one entry for each worker group that completed an Execution pass and therefore produced a complexity report.
+- `tree_grading_summary`: Include one entry for each worker group that reached tree grading.
 - `qa_summary`: Include one entry for each worker group that reached QA.
 - `cleanup_summary.deleted_paths`: Must list what was actually deleted. Use an empty array when the workspace was preserved.
 - `cleanup_summary.retained_file`: Must be `.pipeline-last-run-summary.json`.
@@ -848,9 +1051,9 @@ Consumed by: **Codex host UI** or any bridge that can map pipeline progress to a
 | Pipeline condition | Pet state |
 |---|---|
 | Run, Spec, Plan, Architecture, Dispatch, Execution, Validation, QA, Doc | `running` |
-| Review and Final Assessment | `review` |
+| Tree Grading and Final Assessment | `review` |
 | Accepted final result | `waving` |
-| Validation failure, Review failure, rejected run | `failed` |
+| Validation failure, Tree Grading failure, rejected run | `failed` |
 | Pause for human input or merge conflict | `waiting` |
 
 ### Field Rules

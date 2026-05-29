@@ -11,7 +11,7 @@ The local Codex agent is the orchestrator. It owns:
 - User communication
 - `.pipeline-workspace/` artifact persistence
 - Stage prompt construction
-- Review aggregation
+- Tree Rubrics and Tree Grading aggregation
 - Merge and conflict decisions
 - Final integration and cleanup
 
@@ -31,7 +31,7 @@ metadata. The orchestrator validates and writes canonical artifacts locally.
 - Keep orchestration local. Subagents produce artifacts or proposals; the
   orchestrator decides the next step.
 - Close completed agents after their outputs are integrated.
-- Before EME review, close finished stage agents so the three reviewer fan-out
+- Before Tree Grading, close finished stage agents so the three-grader fan-out
   does not fail on thread limits.
 
 When the user explicitly invokes this skill, treat that as authorization for
@@ -64,19 +64,23 @@ again unless a separate blocker remains.
 | Dispatch | `default` |
 | Execution | `worker` |
 | Validation | `worker` |
-| Review | `default` |
+| Tree Classification | `default` |
+| Tree Rubric Generation | `default` |
+| Tree Rubric Verification | `default` |
+| Tree Rubric Refinement | `default` |
+| Tree Grading | `default` |
 | QA | `worker` |
 | Documentation | `worker` |
 | Final Assessment | `default` |
 | Merge | orchestrator-local |
 | Cleanup | orchestrator-local |
 
-Use `explorer` only for narrow side questions during architecture or review,
+Use `explorer` only for narrow side questions during architecture or grading,
 not for the main pipeline stages.
 
 ## Model And Wait Policy
 
-Default stage profiles are pinned in `src/runtime/constants.js`:
+Default Codex stage profiles are pinned in `src/runtime/constants.js`:
 
 - `model: "gpt-5.5"`
 - `reasoningEffort: "xhigh"`
@@ -102,5 +106,5 @@ again with the same long timeout unless a real blocker appears.
 
 While a blocking stage runs, continue non-overlapping local work: initialize the
 workspace, preload upcoming prompts, validate completed artifacts, prepare
-merge/review bookkeeping, and close finished agents.
+merge/grading bookkeeping, and close finished agents.
 

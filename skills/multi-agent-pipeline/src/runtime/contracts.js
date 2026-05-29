@@ -2,6 +2,7 @@ import {
   FINAL_ASSESSMENT_DIMENSIONS,
   INTEGRATION_STRATEGY,
   PRE_CRITERIA,
+  TREE_RUBRIC_VALIDATION_DIMENSIONS,
 } from "./constants.js";
 import { ContractValidationError } from "./errors.js";
 import { CODEX_PET_STATES } from "./pet-events.js";
@@ -62,6 +63,14 @@ function expectNumber(value, fieldName, artifactName, { min = null } = {}) {
 
   if (min !== null && value < min) {
     fail(artifactName, `${fieldName} must be >= ${min}`);
+  }
+
+  return value;
+}
+
+function expectBoolean(value, fieldName, artifactName) {
+  if (typeof value !== "boolean") {
+    fail(artifactName, `${fieldName} must be a boolean`);
   }
 
   return value;
@@ -812,6 +821,403 @@ function validateConflictResolution(artifact, context = {}) {
   return resolution;
 }
 
+function validateTreeClassification(artifact, context = {}) {
+  const artifactName = "tree-classification";
+  const classification = expectObject(artifact, artifactName, artifactName);
+  expectVersion(classification.version, artifactName);
+  expectString(classification.task_id, "task_id", artifactName);
+  expectString(classification.group_id, "group_id", artifactName);
+  expectString(classification.task_type, "task_type", artifactName);
+  expectBoolean(
+    classification.depth_enhancement_applicable,
+    "depth_enhancement_applicable",
+    artifactName,
+  );
+
+  const branches = expectArray(
+    classification.recommended_branches,
+    "recommended_branches",
+    artifactName,
+    { minLength: 1 },
+  );
+  branches.forEach((branch, index) => {
+    const entry = expectObject(branch, `recommended_branches[${index}]`, artifactName);
+    expectString(entry.name, `recommended_branches[${index}].name`, artifactName);
+    expectString(entry.name_en, `recommended_branches[${index}].name_en`, artifactName);
+    expectString(entry.rationale, `recommended_branches[${index}].rationale`, artifactName);
+  });
+
+  expectString(classification.summary, "summary", artifactName);
+  if (context.workerGroup && classification.group_id !== context.workerGroup.group_id) {
+    fail(artifactName, "group_id must match worker group");
+  }
+
+  return classification;
+}
+
+function validateTreeNodeSource(source, fieldName, artifactName) {
+  expectString(source, fieldName, artifactName);
+  if (
+    !/^(KEEP_\d+|MERGE_\d+(?:_\d+)+|ADD|DECOMPOSE_from_\d+|DEEPEN)$/.test(source)
+  ) {
+    fail(artifactName, `${fieldName} has unsupported source marker`);
+  }
+}
+
+function validateTreeRubrics(artifact, artifactName = "tree-rubrics", context = {}) {
+  const rubric = expectObject(artifact, artifactName, artifactName);
+  expectVersion(rubric.version, artifactName);
+  expectString(rubric.task_id, "task_id", artifactName);
+  expectString(rubric.group_id, "group_id", artifactName);
+  expectString(rubric.task_type, "task_type", artifactName);
+
+  const branches = expectArray(rubric.branches, "branches", artifactName, { minLength: 1 });
+  const seenNodeIds = new Set();
+  branches.forEach((branch, branchIndex) => {
+    const branchNumber = branchIndex + 1;
+    const entry = expectObject(branch, `branches[${branchIndex}]`, artifactName);
+    expectString(entry.name, `branches[${branchIndex}].name`, artifactName);
+    expectString(entry.name_en, `branches[${branchIndex}].name_en`, artifactName);
+    const nodes = expectArray(entry.nodes, `branches[${branchIndex}].nodes`, artifactName, {
+      minLength: 1,
+    });
+    nodes.forEach((node, nodeIndex) => {
+      const nodeEntry = expectObject(
+        node,
+        `branches[${branchIndex}].nodes[${nodeIndex}]`,
+        artifactName,
+      );
+      expectInteger(
+        nodeEntry.depth,
+        `branches[${branchIndex}].nodes[${nodeIndex}].depth`,
+        artifactName,
+        { min: 1 },
+      );
+      expectString(nodeEntry.id, `branches[${branchIndex}].nodes[${nodeIndex}].id`, artifactName);
+      const match = nodeEntry.id.match(/^B(\d+)-D(\d+)-(\d{2})$/);
+      if (!match) {
+        fail(artifactName, `${nodeEntry.id} must match B{branch}-D{depth}-{seq}`);
+      }
+
+      if (Number(match[1]) !== branchNumber) {
+        fail(artifactName, `${nodeEntry.id} branch number does not match branch index`);
+      }
+
+      if (Number(match[2]) !== nodeEntry.depth) {
+        fail(artifactName, `${nodeEntry.id} depth does not match node.depth`);
+      }
+
+      if (seenNodeIds.has(nodeEntry.id)) {
+        fail(artifactName, `duplicate node id ${nodeEntry.id}`);
+      }
+
+      seenNodeIds.add(nodeEntry.id);
+      expectString(
+        nodeEntry.content,
+        `branches[${branchIndex}].nodes[${nodeIndex}].content`,
+        artifactName,
+      );
+      validateTreeNodeSource(
+        nodeEntry.source,
+        `branches[${branchIndex}].nodes[${nodeIndex}].source`,
+        artifactName,
+      );
+      expectStringArray(
+        nodeEntry.requirement_ids,
+        `branches[${branchIndex}].nodes[${nodeIndex}].requirement_ids`,
+        artifactName,
+      );
+      expectStringArray(
+        nodeEntry.output_file_hints,
+        `branches[${branchIndex}].nodes[${nodeIndex}].output_file_hints`,
+        artifactName,
+      );
+    });
+  });
+
+  if (context.workerGroup && rubric.group_id !== context.workerGroup.group_id) {
+    fail(artifactName, "group_id must match worker group");
+  }
+
+  return rubric;
+}
+
+function validateTreeRubricVerification(artifact, context = {}) {
+  const artifactName = "tree-rubric-verification";
+  const verification = expectObject(artifact, artifactName, artifactName);
+  expectVersion(verification.version, artifactName);
+  expectString(verification.task_id, "task_id", artifactName);
+  expectString(verification.group_id, "group_id", artifactName);
+  expectEnum(verification.status, "status", artifactName, ["pass", "fail"]);
+
+  const dimensions = expectArray(
+    verification.dimension_results,
+    "dimension_results",
+    artifactName,
+    { minLength: TREE_RUBRIC_VALIDATION_DIMENSIONS.length },
+  );
+  if (dimensions.length !== TREE_RUBRIC_VALIDATION_DIMENSIONS.length) {
+    fail(
+      artifactName,
+      `dimension_results must contain exactly ${TREE_RUBRIC_VALIDATION_DIMENSIONS.length} entries`,
+    );
+  }
+
+  dimensions.forEach((dimension, index) => {
+    const entry = expectObject(dimension, `dimension_results[${index}]`, artifactName);
+    if (entry.dimension !== TREE_RUBRIC_VALIDATION_DIMENSIONS[index]) {
+      fail(
+        artifactName,
+        `dimension_results[${index}].dimension must be ${TREE_RUBRIC_VALIDATION_DIMENSIONS[index]}`,
+      );
+    }
+
+    expectEnum(entry.status, `dimension_results[${index}].status`, artifactName, [
+      "pass",
+      "fail",
+      "warning",
+    ]);
+    expectString(entry.evidence, `dimension_results[${index}].evidence`, artifactName);
+    if (entry.status === "pass") {
+      if (entry.suggestion !== null) {
+        fail(artifactName, `dimension_results[${index}].suggestion must be null for pass`);
+      }
+    } else {
+      expectString(entry.suggestion, `dimension_results[${index}].suggestion`, artifactName);
+    }
+  });
+
+  expectStringArray(verification.required_changes, "required_changes", artifactName);
+  expectString(verification.summary, "summary", artifactName);
+  if (context.workerGroup && verification.group_id !== context.workerGroup.group_id) {
+    fail(artifactName, "group_id must match worker group");
+  }
+
+  return verification;
+}
+
+function validateFinalOutputFiles(artifact, context = {}) {
+  const artifactName = "final-output-files";
+  const snapshot = expectObject(artifact, artifactName, artifactName);
+  expectVersion(snapshot.version, artifactName);
+  expectString(snapshot.group_id, "group_id", artifactName);
+  expectInteger(snapshot.iteration, "iteration", artifactName, { min: 1 });
+  const files = expectArray(snapshot.files, "files", artifactName, { minLength: 1 });
+  const seenPaths = new Set();
+  files.forEach((file, index) => {
+    const entry = expectObject(file, `files[${index}]`, artifactName);
+    expectString(entry.path, `files[${index}].path`, artifactName);
+    if (seenPaths.has(entry.path)) {
+      fail(artifactName, `duplicate output file path ${entry.path}`);
+    }
+
+    seenPaths.add(entry.path);
+    expectEnum(entry.status, `files[${index}].status`, artifactName, ["present", "deleted"]);
+    if (entry.status === "present") {
+      expectStringValue(entry.content, `files[${index}].content`, artifactName);
+    } else if (entry.content !== null) {
+      fail(artifactName, `files[${index}].content must be null for deleted files`);
+    }
+  });
+
+  if (context.workerGroup && snapshot.group_id !== context.workerGroup.group_id) {
+    fail(artifactName, "group_id must match worker group");
+  }
+
+  return snapshot;
+}
+
+function collectTreeNodeIds(rubric) {
+  return rubric.branches.flatMap((branch) => branch.nodes.map((node) => node.id));
+}
+
+function validateTreeGradingIndividual(artifact, context = {}) {
+  const artifactName = "tree-grading-individual";
+  const grading = expectObject(artifact, artifactName, artifactName);
+  expectVersion(grading.version, artifactName);
+  expectString(grading.group_id, "group_id", artifactName);
+  expectInteger(grading.iteration, "iteration", artifactName, { min: 1 });
+  expectInteger(grading.grader_id, "grader_id", artifactName, { min: 1 });
+  expectString(grading.task_id, "task_id", artifactName);
+
+  const nodeResults = expectArray(grading.node_results, "node_results", artifactName, {
+    minLength: 1,
+  });
+  const seenNodeIds = new Set();
+  const outputPaths = new Set((context.finalOutputFiles?.files ?? []).map((file) => file.path));
+  const forbiddenEvidenceMarkers = [
+    "execution-report",
+    "validation-report",
+    "merge-report",
+    "complexity-report",
+    "tool log",
+    ".pipeline-workspace",
+  ];
+
+  nodeResults.forEach((result, index) => {
+    const entry = expectObject(result, `node_results[${index}]`, artifactName);
+    expectString(entry.node_id, `node_results[${index}].node_id`, artifactName);
+    if (seenNodeIds.has(entry.node_id)) {
+      fail(artifactName, `duplicate node result ${entry.node_id}`);
+    }
+
+    seenNodeIds.add(entry.node_id);
+    expectEnum(entry.raw_score, `node_results[${index}].raw_score`, artifactName, [0, 1]);
+    expectString(entry.evidence, `node_results[${index}].evidence`, artifactName);
+    const evidenceLower = entry.evidence.toLowerCase();
+    forbiddenEvidenceMarkers.forEach((marker) => {
+      if (evidenceLower.includes(marker)) {
+        fail(artifactName, `node_results[${index}].evidence references forbidden process artifact`);
+      }
+    });
+
+    if (outputPaths.size > 0 && ![...outputPaths].some((filePath) => entry.evidence.includes(filePath))) {
+      fail(artifactName, `node_results[${index}].evidence must cite a final output file path`);
+    }
+
+    if (entry.raw_score === 1) {
+      if (entry.failure_reason !== null || entry.suggestion !== null) {
+        fail(
+          artifactName,
+          `node_results[${index}].failure_reason and suggestion must be null for passing nodes`,
+        );
+      }
+    } else {
+      expectString(entry.failure_reason, `node_results[${index}].failure_reason`, artifactName);
+      expectString(entry.suggestion, `node_results[${index}].suggestion`, artifactName);
+    }
+  });
+
+  if (context.rubric) {
+    const expectedNodeIds = collectTreeNodeIds(context.rubric);
+    if (nodeResults.length !== expectedNodeIds.length) {
+      fail(artifactName, "node_results must score every rubric node exactly once");
+    }
+
+    expectedNodeIds.forEach((nodeId) => {
+      if (!seenNodeIds.has(nodeId)) {
+        fail(artifactName, `missing node result ${nodeId}`);
+      }
+    });
+  }
+
+  return grading;
+}
+
+function validateTreeGradingFeedback(artifact, context = {}) {
+  const artifactName = "tree-grading-feedback";
+  const feedback = expectObject(artifact, artifactName, artifactName);
+  expectVersion(feedback.version, artifactName);
+  expectString(feedback.group_id, "group_id", artifactName);
+  expectInteger(feedback.iteration, "iteration", artifactName, { min: 1 });
+  expectString(feedback.task_id, "task_id", artifactName);
+  expectNumber(feedback.threshold, "threshold", artifactName, { min: 0 });
+  if (feedback.threshold > 1) {
+    fail(artifactName, "threshold must be <= 1");
+  }
+
+  expectBoolean(feedback.require_depth_one_pass, "require_depth_one_pass", artifactName);
+  expectEnum(feedback.verdict, "verdict", artifactName, ["pass", "fail"]);
+  expectNumber(feedback.weighted_score, "weighted_score", artifactName, { min: 0 });
+  expectNumber(feedback.pass_rate, "pass_rate", artifactName, { min: 0 });
+  if (feedback.weighted_score > 1 || feedback.pass_rate > 1) {
+    fail(artifactName, "weighted_score and pass_rate must be <= 1");
+  }
+
+  expectInteger(feedback.num_branches, "num_branches", artifactName, { min: 1 });
+  expectInteger(feedback.max_depth, "max_depth", artifactName, { min: 1 });
+  const nodesPassed = expectStringArray(feedback.nodes_passed, "nodes_passed", artifactName);
+  const nodesFailed = expectStringArray(feedback.nodes_failed, "nodes_failed", artifactName);
+  expectStringArray(feedback.blocking_nodes, "blocking_nodes", artifactName);
+  expectStringArray(feedback.non_blocking_nodes, "non_blocking_nodes", artifactName);
+
+  const nodeResults = expectArray(feedback.node_results, "node_results", artifactName, {
+    minLength: 1,
+  });
+  let failedCount = 0;
+  nodeResults.forEach((result, index) => {
+    const entry = expectObject(result, `node_results[${index}]`, artifactName);
+    expectString(entry.node_id, `node_results[${index}].node_id`, artifactName);
+    expectString(entry.branch, `node_results[${index}].branch`, artifactName);
+    expectInteger(entry.depth, `node_results[${index}].depth`, artifactName, { min: 1 });
+    expectInteger(entry.weight, `node_results[${index}].weight`, artifactName, { min: 1 });
+    expectEnum(entry.raw_score, `node_results[${index}].raw_score`, artifactName, [0, 1]);
+    expectEnum(entry.effective_score, `node_results[${index}].effective_score`, artifactName, [
+      0,
+      1,
+    ]);
+    expectNullableString(
+      entry.dependency_blocked_by,
+      `node_results[${index}].dependency_blocked_by`,
+      artifactName,
+    );
+    expectEnum(entry.consensus, `node_results[${index}].consensus`, artifactName, [
+      "unanimous",
+      "majority",
+    ]);
+    const graderScores = expectArray(
+      entry.grader_scores,
+      `node_results[${index}].grader_scores`,
+      artifactName,
+      { minLength: 1 },
+    );
+    graderScores.forEach((score, scoreIndex) => {
+      const scoreEntry = expectObject(
+        score,
+        `node_results[${index}].grader_scores[${scoreIndex}]`,
+        artifactName,
+      );
+      expectInteger(scoreEntry.grader_id, `grader_scores[${scoreIndex}].grader_id`, artifactName, {
+        min: 1,
+      });
+      expectEnum(scoreEntry.raw_score, `grader_scores[${scoreIndex}].raw_score`, artifactName, [
+        0,
+        1,
+      ]);
+      expectString(scoreEntry.evidence, `grader_scores[${scoreIndex}].evidence`, artifactName);
+      expectNullableString(
+        scoreEntry.failure_reason,
+        `grader_scores[${scoreIndex}].failure_reason`,
+        artifactName,
+      );
+      expectNullableString(
+        scoreEntry.suggestion,
+        `grader_scores[${scoreIndex}].suggestion`,
+        artifactName,
+      );
+    });
+    if (entry.effective_score === 0) {
+      failedCount += 1;
+    }
+  });
+
+  if (nodesPassed.length + nodesFailed.length !== nodeResults.length) {
+    fail(artifactName, "nodes_passed and nodes_failed must partition node_results");
+  }
+
+  if (feedback.verdict === "pass" && feedback.blocking_nodes.length > 0) {
+    fail(artifactName, "blocking_nodes must be empty when verdict is pass");
+  }
+
+  if (feedback.verdict === "fail" && feedback.blocking_nodes.length === 0) {
+    fail(artifactName, "blocking_nodes must be non-empty when verdict is fail");
+  }
+
+  if (feedback.verdict === "pass" && feedback.non_blocking_nodes.length !== failedCount) {
+    fail(artifactName, "non_blocking_nodes must preserve failed nodes on pass");
+  }
+
+  if (context.rubric) {
+    const expectedNodeIds = collectTreeNodeIds(context.rubric);
+    if (nodeResults.length !== expectedNodeIds.length) {
+      fail(artifactName, "node_results must include every rubric node");
+    }
+  }
+
+  expectString(feedback.summary, "summary", artifactName);
+  return feedback;
+}
+
 function validateReviewIndividual(artifact, context = {}) {
   const artifactName = "review-individual";
   const review = expectObject(artifact, artifactName, artifactName);
@@ -1339,6 +1745,35 @@ function validateRunSummary(artifact) {
     );
   });
 
+  const treeGradingSummary = expectArray(
+    summary.tree_grading_summary,
+    "tree_grading_summary",
+    artifactName,
+  );
+  treeGradingSummary.forEach((entry, index) => {
+    const item = expectObject(entry, `tree_grading_summary[${index}]`, artifactName);
+    expectString(item.group_id, `tree_grading_summary[${index}].group_id`, artifactName);
+    expectEnum(item.verdict, `tree_grading_summary[${index}].verdict`, artifactName, [
+      "pass",
+      "fail",
+    ]);
+    expectNumber(
+      item.weighted_score,
+      `tree_grading_summary[${index}].weighted_score`,
+      artifactName,
+      { min: 0 },
+    );
+    if (item.weighted_score > 1) {
+      fail(artifactName, `tree_grading_summary[${index}].weighted_score must be <= 1`);
+    }
+
+    expectStringArray(
+      item.nodes_failed,
+      `tree_grading_summary[${index}].nodes_failed`,
+      artifactName,
+    );
+  });
+
   const cleanupSummary = expectObject(summary.cleanup_summary, "cleanup_summary", artifactName);
   if (typeof cleanupSummary.deleted_workspace !== "boolean") {
     fail(artifactName, "cleanup_summary.deleted_workspace must be boolean");
@@ -1392,6 +1827,20 @@ export function validateArtifact(artifactType, artifact, context = {}) {
       return validateComplexityReport(artifact);
     case "conflict-resolution":
       return validateConflictResolution(artifact, context);
+    case "tree-classification":
+      return validateTreeClassification(artifact, context);
+    case "tree-rubrics":
+      return validateTreeRubrics(artifact, "tree-rubrics", context);
+    case "tree-rubrics-refined":
+      return validateTreeRubrics(artifact, "tree-rubrics-refined", context);
+    case "tree-rubric-verification":
+      return validateTreeRubricVerification(artifact, context);
+    case "final-output-files":
+      return validateFinalOutputFiles(artifact, context);
+    case "tree-grading-individual":
+      return validateTreeGradingIndividual(artifact, context);
+    case "tree-grading-feedback":
+      return validateTreeGradingFeedback(artifact, context);
     case "review-individual":
       return validateReviewIndividual(artifact, context);
     case "review-feedback":
