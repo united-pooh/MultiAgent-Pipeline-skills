@@ -40,7 +40,7 @@ export class StageCatalog {
     return value;
   }
 
-  resolveStageProfile(stage, { reviewerId = null, reviewMode = null } = {}) {
+  resolveStageProfile(stage, { reviewerId = null, reviewMode = null, graderId = null } = {}) {
     const profile = this.stageProfiles[stage];
     if (!profile) {
       throw new Error(`Unknown stage profile: ${stage}`);
@@ -90,6 +90,14 @@ export class StageCatalog {
 }
 
 export function buildStageRequestKey(stage, context = {}) {
+  if (stage === "tree-grading") {
+    return `${stage}:${context.workerGroup?.group_id ?? "unknown"}:iteration-${context.iteration ?? "?"}:grader-${context.graderId ?? "?"}`;
+  }
+
+  if (stage.startsWith("tree-")) {
+    return `${stage}:${context.workerGroup?.group_id ?? "unknown"}:iteration-${context.iteration ?? "?"}`;
+  }
+
   if (stage === "review") {
     return `${stage}:${context.workerGroup?.group_id ?? "unknown"}:iteration-${context.iteration ?? "?"}:reviewer-${context.reviewerId ?? "?"}`;
   }

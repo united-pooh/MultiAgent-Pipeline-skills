@@ -18,7 +18,7 @@ Evaluate the delivered implementation holistically against the original requirem
 - All `merge-report.json` files (one per worker group execution pass)
 - All `validation-report.json` files (one per worker group)
 - All `conflict-resolution.json` files (when any merge conflict required human intervention)
-- All `review_feedback.json` files (one per worker group)
+- All `tree_grading_feedback.json` files (one per worker group)
 - All `qa-report.json` files (one per worker group)
 - `doc-report.json`
 - Previous `final-assessment.json` iterations (if any, from `assessment_history/`)
@@ -37,12 +37,12 @@ Evaluate exactly 6 dimensions in this order:
 Are all `must-have` and `should-have` requirements from `spec.json` fully implemented and verified? Are acceptance criteria met not just in code but in observable behavior?
 
 ### 2. Implementation Quality
-Beyond what Review checked per-file, does the combined implementation across all worker groups form a coherent, well-structured whole? Are there integration gaps, inconsistencies between workers' outputs, or emergent issues that per-worker review could not catch?
+Beyond what Tree Rubrics grading checked per group, does the combined implementation across all worker groups form a coherent, well-structured whole? Are there integration gaps, inconsistencies between workers' outputs, or emergent issues that per-group grading could not catch?
 
 Use `complexity-report.json` here as a direct input. If any report says readability is `low` or complexity is `high`, decide whether that is justified by the problem shape or whether it lowers implementation quality.
 
 ### 3. Architectural Soundness
-Does the final implementation faithfully follow `architecture.json`? Are there deviations that accumulated across workers or review iterations that individually seemed acceptable but collectively degraded the design?
+Does the final implementation faithfully follow `architecture.json`? Are there deviations that accumulated across workers or grading iterations that individually seemed acceptable but collectively degraded the design?
 
 ### 4. Test Confidence
 Considering all QA reports together, is there sufficient test coverage for the feature as a whole? Are there cross-cutting scenarios that no individual QA run tested because they span multiple worker groups?

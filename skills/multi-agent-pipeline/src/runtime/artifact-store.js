@@ -40,6 +40,9 @@ export class ArtifactStore {
       "complexity",
       "merge",
       "validation",
+      "tree_rubrics",
+      "final_outputs",
+      "grading_history",
       "conflict_resolutions",
       "review_history",
       "qa",
@@ -165,6 +168,82 @@ export class ArtifactStore {
     return relativePath;
   }
 
+  async writeTreeClassification(groupId, iteration, artifact) {
+    const validated = validateArtifact("tree-classification", artifact);
+    const relativePath = path.posix.join(
+      "tree_rubrics",
+      groupId,
+      `iteration-${iteration}-classification.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
+    return relativePath;
+  }
+
+  async writeTreeRubrics(groupId, iteration, artifact) {
+    const validated = validateArtifact("tree-rubrics", artifact);
+    const relativePath = path.posix.join(
+      "tree_rubrics",
+      groupId,
+      `iteration-${iteration}-tree-rubrics.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
+    return relativePath;
+  }
+
+  async writeTreeRubricVerification(groupId, iteration, artifact) {
+    const validated = validateArtifact("tree-rubric-verification", artifact);
+    const relativePath = path.posix.join(
+      "tree_rubrics",
+      groupId,
+      `iteration-${iteration}-validation-result.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
+    return relativePath;
+  }
+
+  async writeRefinedTreeRubrics(groupId, iteration, artifact) {
+    const validated = validateArtifact("tree-rubrics-refined", artifact);
+    const relativePath = path.posix.join(
+      "tree_rubrics",
+      groupId,
+      `iteration-${iteration}-tree-rubrics-refined.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
+    return relativePath;
+  }
+
+  async writeFinalOutputFiles(groupId, iteration, artifact) {
+    const validated = validateArtifact("final-output-files", artifact);
+    const relativePath = path.posix.join(
+      "final_outputs",
+      groupId,
+      `iteration-${iteration}-final-output-files.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
+    return relativePath;
+  }
+
+  async writeTreeGraderOutput(groupId, iteration, graderId, artifact) {
+    const relativePath = path.posix.join(
+      "grading_history",
+      groupId,
+      `iteration-${iteration}-grader-${graderId}.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), artifact);
+    return relativePath;
+  }
+
+  async writeTreeGradingFeedback(groupId, iteration, artifact) {
+    const validated = validateArtifact("tree-grading-feedback", artifact);
+    const relativePath = path.posix.join(
+      "grading_history",
+      groupId,
+      `iteration-${iteration}-tree-grading-feedback.json`,
+    );
+    await writeJson(this.workspacePath(relativePath), validated);
+    return relativePath;
+  }
+
   async writeReviewerOutput(groupId, iteration, reviewerId, artifact) {
     const relativePath = path.posix.join(
       "review_history",
@@ -285,6 +364,28 @@ export class ArtifactStore {
 
   async readGroupQaReports(groupId) {
     return this.listWorkspaceArtifacts(path.posix.join("qa", groupId));
+  }
+
+  async readGroupTreeGradingFeedbackHistory(groupId) {
+    return this.listWorkspaceArtifacts(path.posix.join("grading_history", groupId), {
+      include: (fileName) => fileName.endsWith("-tree-grading-feedback.json"),
+    });
+  }
+
+  async readGroupTreeGraderOutputs(groupId, { iteration = null } = {}) {
+    return this.listWorkspaceArtifacts(path.posix.join("grading_history", groupId), {
+      include: (fileName) => {
+        if (!fileName.endsWith(".json") || fileName.endsWith("-tree-grading-feedback.json")) {
+          return false;
+        }
+
+        if (!fileName.includes("-grader-")) {
+          return false;
+        }
+
+        return iteration === null || fileName.startsWith(`iteration-${iteration}-grader-`);
+      },
+    });
   }
 
   async readAssessmentHistory() {

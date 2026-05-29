@@ -3,11 +3,12 @@ name: multi-agent-pipeline
 description: >
   Run a Codex-compatible production pipeline for non-trivial implementation work:
   Brainstorming, Spec, Plan, Architecture, Dispatch, Execution, Complexity,
-  Merge, Validation, Review, QA, Documentation, Final Assessment, and Cleanup.
-  Use when the user asks for multi-agent, pipeline, staged delivery, full
-  implementation, substantial refactor, or strict review/QA. The entrypoint is
-  OpenCode-compatible and progressively discloses detailed rules through
-  agents/, references/, scripts/, src/, and test/ files.
+  Merge, Validation, Tree Rubrics, Tree Grading, QA, Documentation, Final
+  Assessment, and Cleanup. Use when the user asks for multi-agent, pipeline,
+  staged delivery, full implementation, substantial refactor, or strict
+  validation/grading. The entrypoint is OpenCode-compatible and progressively
+  discloses detailed rules through agents/, references/, scripts/, src/, and
+  test/ files.
 compatibility: codex, opencode
 metadata:
   audience: orchestrators
@@ -21,7 +22,7 @@ Use this skill when the task is large enough to benefit from explicit staging
 instead of ad hoc implementation.
 
 The local agent is the orchestrator. It owns user communication, artifact
-persistence, review aggregation, merge decisions, and final integration.
+persistence, tree-grading aggregation, merge decisions, and final integration.
 Subagents own bounded stage work.
 
 ## Progressive Disclosure
@@ -34,11 +35,12 @@ load cheaply, then read only the files needed for the current stage.
 - For OpenCode expert-mode setup, read `references/opencode-expert-mode.md`.
 - For the phase-by-phase pipeline, read `references/pipeline-stages.md`.
 - For workspace layout and pet events, read `references/workspace-and-events.md`.
-- For orchestration, artifact, review, merge, and cleanup rules, read
+- For orchestration, artifact, grading, merge, and cleanup rules, read
   `references/orchestration-rules.md`.
 - For subagent prompts, read only the current `agents/<stage>.md`.
 - For artifact shapes, read `references/contracts.md`.
-- For review scoring, read `references/pre-rubric.md` only when entering Review.
+- For legacy PRE review scoring, read `references/pre-rubric.md` only when
+  explicitly using the deprecated Review stage.
 - For runnable prompt scaffolds, read `references/orchestrator-prompts.md`.
 - For a full example, read `references/example-run.md` only when debugging or
   explaining a complete run.
@@ -51,9 +53,10 @@ Use this pipeline for:
 
 - New features spanning multiple files or subsystems
 - Refactors with meaningful behavior, API, runtime, or documentation impact
-- Tasks that need explicit implementation, validation, review, QA, and docs
+- Tasks that need explicit implementation, validation, tree grading, QA, and
+  docs
 - User requests mentioning `multi-agent`, `pipeline`, `production workflow`,
-  `full implementation`, staged delivery, or strict review
+  `full implementation`, staged delivery, or strict grading
 
 Skip this pipeline for:
 
@@ -69,14 +72,18 @@ Ask only for blocking ambiguities.
 
 ```text
 Brainstorming -> Spec -> Plan -> Architecture -> Dispatch
--> Execution -> Complexity Hook -> Merge -> Validation -> Review
--> QA -> Documentation -> Final Assessment -> Cleanup
+-> Execution -> Complexity Hook -> Merge -> Validation
+-> Tree Classification -> Tree Rubric Generation -> Tree Rubric Verification
+-> Tree Rubric Refinement -> Tree Grading -> QA
+-> Documentation -> Final Assessment -> Cleanup
 ```
 
 Local-only stages:
 
 - Brainstorming
 - Merge
+- Final output file collection for grading
+- Tree grading aggregation
 - Cleanup
 
 Subagent stages:
@@ -87,26 +94,36 @@ Subagent stages:
 - Dispatch
 - Execution
 - Validation
-- Review
+- Tree Classification
+- Tree Rubric Generation
+- Tree Rubric Verification
+- Tree Rubric Refinement
+- Tree Grading
 - QA
 - Documentation
 - Final Assessment
 
+The legacy `Review` stage and PRE rubric remain as compatibility artifacts, but
+the active quality gate is Tree Rubrics plus Tree Grading.
+
 ## Non-Negotiable Rules
 
 - The orchestrator is the source of truth for `.pipeline-workspace/` artifacts.
-- Merge and Cleanup are orchestrator-local. Do not spawn subagents for them.
+- Merge, final output collection, grading aggregation, and Cleanup are
+  orchestrator-local.
 - Use conservative three-way merge semantics and pause for human resolution when
   automatic merge safety is ambiguous.
 - Do not revert user edits or unrelated worktree changes.
 - Dispatch owns skill routing. Later stages must not re-infer required skills.
 - Spec and Plan must attach `superpowers` and restrict it to planning
   discipline only.
-- Execution and Review must attach `ce-frontend-design` when Dispatch routes it.
-- Validation must run before Review for every merged worker group unless it is
-  explicitly skipped with evidence.
-- Review defaults to `EME`; use `PRE` only for clearly small changes or when the
-  user asks for a cheaper/faster pass.
+- Execution must attach `ce-frontend-design` when Dispatch routes it.
+- Validation must run before Tree Rubrics for every merged worker group unless
+  it is explicitly skipped with evidence.
+- Tree Grading uses 3 independent graders by default. Do not downgrade the
+  grader count unless the user explicitly asks for a cheaper/faster pass.
+- Tree Grading must judge only `spec`, `tree_rubrics_refined.json`, and
+  `final-output-files.json`; do not grade process logs or agent behavior.
 - QA must pass before Documentation and Final Assessment.
 - Accepted runs write `.pipeline-last-run-summary.json` and remove
   `.pipeline-workspace/`; rejected or paused runs keep the workspace.
@@ -123,10 +140,15 @@ Read the current stage prompt just before spawning or running that stage:
 | Dispatch | `agents/dispatch.md` | `references/contracts.md` |
 | Execution | `agents/execution.md` | `references/contracts.md` |
 | Validation | `agents/validation.md` | `references/contracts.md` |
-| Review | `agents/review.md` | `references/contracts.md`, `references/pre-rubric.md` |
+| Tree Classification | `agents/tree-classification.md` | `references/contracts.md` |
+| Tree Rubric Generation | `agents/tree-rubric-generation.md` | `references/contracts.md` |
+| Tree Rubric Verification | `agents/tree-rubric-verification.md` | `references/contracts.md` |
+| Tree Rubric Refinement | `agents/tree-rubric-refinement.md` | `references/contracts.md` |
+| Tree Grading | `agents/tree-grading.md` | `references/contracts.md` |
 | QA | `agents/qa.md` | `references/contracts.md` |
 | Documentation | `agents/doc.md` | `references/contracts.md` |
 | Final Assessment | `agents/final-assessment.md` | `references/contracts.md` |
+| Legacy Review | `agents/review.md` | `references/contracts.md`, `references/pre-rubric.md` |
 
 ## Host Notes
 
@@ -157,8 +179,8 @@ For a copy-ready expert primary agent, use
 
 The Node runtime under `src/runtime/` implements the documented contracts for
 artifact storage, stage catalogs, merge, complexity analysis, validation flow,
-review aggregation, final assessment, cleanup summaries, and Codex pet events.
-Run tests from the skill package root with:
+Tree Rubrics, Tree Grading, final assessment, cleanup summaries, and Codex pet
+events. Run tests from the skill package root with:
 
 ```text
 npm test

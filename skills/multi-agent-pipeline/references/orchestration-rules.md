@@ -1,7 +1,7 @@
 # Orchestration Rules
 
 Read this file when constructing prompts, validating artifacts, aggregating
-review, merging proposals, or cleaning up a run.
+Tree Grading, merging proposals, or cleaning up a run.
 
 ## Prompt Construction
 
@@ -14,7 +14,7 @@ For each spawned stage:
   in the current environment.
 - Spec and Plan prompts must attach `superpowers` and explicitly forbid its
   build, TDD, commit, and finish-branch behaviors.
-- Execution and Review prompts must attach `ce-frontend-design` whenever
+- Execution prompts must attach `ce-frontend-design` whenever
   `worker_group.required_skills` contains it.
 - When this skill was explicitly invoked by the user, prompts may treat
   subagent delegation and safe parallel work as authorized within host
@@ -34,26 +34,31 @@ For copy-ready prompt scaffolds, use `references/orchestrator-prompts.md`.
   instead of hand-waving the artifact.
 - Write artifacts even when the corresponding stage also changed files.
 - Artifact persistence and code/doc integration are separate responsibilities.
-- The orchestrator writes `merge-report.json`, `conflict-resolution.json`, and
+- The orchestrator writes `merge-report.json`, `conflict-resolution.json`,
+  `final-output-files.json`, `tree_grading_feedback.json`, and
   `.pipeline-last-run-summary.json` locally.
-- Cleanup eligibility is derived locally after Validation, Review, and QA pass.
+- Cleanup eligibility is derived locally after Validation, Tree Grading, and QA
+  pass.
 
-## Review Aggregation
+## Tree Grading Aggregation
 
-The orchestrator merges reviewer outputs locally:
+The orchestrator merges grader outputs locally:
 
-- Exactly 8 PRE dimensions
-- Majority vote per dimension in `EME`
-- `warning` counts as pass for majority vote
-- Failed-dimension issues merge into `merged_issues`
-- Reviewer IDs stay in `flagged_by`
-- Iteration increments on every review pass for the relevant group
+- Use exactly 3 graders by default.
+- Each rubric node receives a majority-vote score.
+- Depth 1 nodes have weight 1, depth 2 nodes weight 2, and depth 3+ nodes
+  weight 3.
+- If a shallow node fails, deeper nodes in the same branch have effective score
+  0.
+- A group passes when `weighted_score >= 0.80` and all depth-1 nodes pass.
+- Preserve grader IDs, per-node evidence, and dissenting notes in
+  `tree_grading_feedback.json`.
 
-Operational note: `EME` review is the most likely point to hit thread limits
-because it spawns three reviewers at once. Close finished stage agents before
-spawning the reviewer trio. If a reviewer spawn fails from temporary thread
-pressure, close finished idle agents and retry the missing reviewer instead of
-silently downgrading the review.
+Operational note: Tree Grading is the most likely point to hit thread limits
+because it spawns three graders at once. Close finished stage agents before
+spawning the grader trio. If a grader spawn fails from temporary thread
+pressure, close finished idle agents and retry the missing grader instead of
+silently downgrading the grader count.
 
 ## File Ownership And Worker Routing
 
@@ -84,8 +89,8 @@ When spawning `worker` agents:
 
 ## Cleanup Policy
 
-- Validation, Review, and QA passing make a group cleanup-eligible, but do not
-  delete artifacts immediately.
+- Validation, Tree Grading, and QA passing make a group cleanup-eligible, but do
+  not delete artifacts immediately.
 - Only accepted runs automatically delete `.pipeline-workspace/`.
 - Rejected or paused runs keep artifacts so the next iteration can restart from
   `merge` or `execution`.
@@ -93,4 +98,10 @@ When spawning `worker` agents:
   terminal runs.
 - Never delete integrated code, tests, docs, release notes, or user-retained
   files as part of cleanup.
+
+## Legacy PRE Review
+
+PRE/EME Review aggregation remains documented in `agents/review.md` and
+`references/pre-rubric.md` for older runs. Do not use it as the active quality
+gate unless a user explicitly asks to run the legacy review path.
 

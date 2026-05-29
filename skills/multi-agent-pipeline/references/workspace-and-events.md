@@ -19,48 +19,28 @@ Create `.pipeline-workspace/` before the first stage:
 ├── doc-report.json
 ├── final-assessment.json
 ├── bases/
-│   └── wave-1-group-1-base.json
 ├── execution/
-│   ├── GROUP-1/
-│   │   ├── iteration-1-execution-report.json
-│   │   └── iteration-2-execution-report.json
-│   └── GROUP-2/
-│       └── iteration-1-execution-report.json
 ├── complexity/
-│   ├── GROUP-1/
-│   │   ├── iteration-1-complexity-report.json
-│   │   └── iteration-2-complexity-report.json
-│   └── GROUP-2/
-│       └── iteration-1-complexity-report.json
 ├── merge/
-│   ├── GROUP-1/
-│   │   └── iteration-1-merge-report.json
-│   └── GROUP-2/
-│       └── iteration-1-merge-report.json
 ├── validation/
-│   ├── GROUP-1/
-│   │   └── iteration-1-validation-report.json
-│   └── GROUP-2/
-│       └── iteration-1-validation-report.json
 ├── conflict_resolutions/
+├── tree_rubrics/
 │   └── GROUP-1/
-│       └── iteration-1-conflict-resolution.json
-├── review_history/
-│   ├── GROUP-1/
-│   │   ├── iteration-1-reviewer-1.json
-│   │   ├── iteration-1-reviewer-2.json
-│   │   ├── iteration-1-reviewer-3.json
-│   │   └── iteration-1-review-feedback.json
-│   └── GROUP-2/
-│       └── ...
+│       ├── iteration-1-classification.json
+│       ├── iteration-1-tree-rubrics.json
+│       ├── iteration-1-validation-result.json
+│       └── iteration-1-tree-rubrics-refined.json
+├── final_outputs/
+│   └── GROUP-1/
+│       └── iteration-1-final-output-files.json
+├── grading_history/
+│   └── GROUP-1/
+│       ├── iteration-1-grader-1.json
+│       ├── iteration-1-grader-2.json
+│       ├── iteration-1-grader-3.json
+│       └── iteration-1-tree-grading-feedback.json
 ├── qa/
-│   ├── GROUP-1/
-│   │   └── iteration-1-qa-report.json
-│   └── GROUP-2/
-│       └── iteration-1-qa-report.json
 ├── assessment_history/
-│   ├── iteration-1-final-assessment.json
-│   └── ...
 └── logs/
     └── pipeline.log
 ```
@@ -111,8 +91,8 @@ State mapping:
 
 - `running`: Spec, Plan, Execution, Validation, QA, Doc, and other active
   pipeline stages
-- `review`: Review and Final Assessment
-- `failed`: Validation failure, Review failure, or rejected run
+- `review`: Tree Rubrics, Tree Grading, and Final Assessment
+- `failed`: Validation failure, Tree Grading failure, or rejected run
 - `waiting`: pause for human input, including merge conflicts
 - `waving`: accepted final result
 
