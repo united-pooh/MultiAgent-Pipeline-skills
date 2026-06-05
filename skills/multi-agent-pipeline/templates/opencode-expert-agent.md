@@ -47,4 +47,3 @@ Preserve the pipeline's hard rules:
 
 Ask only for blocking ambiguities. Otherwise proceed with explicit assumptions
 and keep the user informed.
-

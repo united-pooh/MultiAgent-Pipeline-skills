@@ -119,4 +119,3 @@ details in separate references and runtime files:
 
 Codex and OpenCode should share the same stage files, contracts, review rubric,
 example run, scripts, runtime, and tests.
-

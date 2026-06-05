@@ -107,4 +107,3 @@ again with the same long timeout unless a real blocker appears.
 While a blocking stage runs, continue non-overlapping local work: initialize the
 workspace, preload upcoming prompts, validate completed artifacts, prepare
 merge/grading bookkeeping, and close finished agents.
-

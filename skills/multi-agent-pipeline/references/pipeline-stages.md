@@ -247,4 +247,3 @@ Rules:
 `agents/review.md` and `references/pre-rubric.md` remain for compatibility with
 older PRE/EME runs. Do not use them as the default quality gate in the active
 pipeline.
-

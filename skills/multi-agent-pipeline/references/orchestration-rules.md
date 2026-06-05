@@ -104,4 +104,3 @@ When spawning `worker` agents:
 PRE/EME Review aggregation remains documented in `agents/review.md` and
 `references/pre-rubric.md` for older runs. Do not use it as the active quality
 gate unless a user explicitly asks to run the legacy review path.
-
