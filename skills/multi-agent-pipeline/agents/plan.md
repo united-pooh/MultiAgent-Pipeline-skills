@@ -10,10 +10,14 @@ Convert `spec.json` into an execution-ready `plan.json`.
 
 - `spec.json`
 - `references/contracts.md`
+- `templates/artifacts/plan.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing a `plan.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/plan.json` as the JSON skeleton. Fill semantic fields
+from the spec; do not leave template blanks in the returned artifact.
 
 ## Planning Skill Requirement
 

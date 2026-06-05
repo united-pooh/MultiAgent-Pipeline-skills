@@ -15,6 +15,7 @@ Implement the requested change in your forked workspace, prepare a merge-ready p
 - `base_ref` for the current execution wave
 - Latest `tree_grading_feedback.json` when this is a retry
 - `references/contracts.md`
+- `templates/artifacts/execution-report.json`
 
 ## Output
 
@@ -22,6 +23,10 @@ Implement the requested change in your forked workspace, prepare a merge-ready p
 2. Keep the change scoped and reviewable so the orchestrator can merge it into the main workspace.
 3. Return exactly one fenced `json` block containing an `execution-report.json` payload matching the contract in `references/contracts.md`.
 4. Do not return extra prose outside the JSON block.
+
+Use `templates/artifacts/execution-report.json` as the JSON skeleton. Fill
+semantic fields from the implemented proposal; do not leave template blanks in
+the returned artifact.
 
 ## Ownership Rules
 

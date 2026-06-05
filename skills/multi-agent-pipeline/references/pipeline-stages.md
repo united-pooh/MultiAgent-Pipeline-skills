@@ -215,6 +215,9 @@ Rules:
   notes.
 - Return `doc-report.json`.
 - The orchestrator reviews and integrates doc changes before final assessment.
+- If `gitPolicy` is enabled, the orchestrator may commit the integrated
+  `updated_files` with a `docs(pipeline): :memo: ...` Chinese Conventional
+  Commit message. Push is controlled by the Doc phase policy.
 
 ## 12. Final Assessment
 
@@ -238,7 +241,10 @@ Rules:
 
 - On accept, write `.pipeline-last-run-summary.json`, then delete
   `.pipeline-workspace/`.
+- If `gitPolicy` is enabled, publish the accepted final worktree after cleanup
+  with a gitmoji + Conventional Commits Chinese message.
 - On reject or pause, preserve `.pipeline-workspace/`.
+- On reject or pause, do not auto commit or push.
 - Never delete integrated code, tests, docs, release notes, or user-retained
   files as part of cleanup.
 

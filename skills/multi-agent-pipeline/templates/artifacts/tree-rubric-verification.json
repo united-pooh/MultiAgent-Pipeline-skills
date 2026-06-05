@@ -1,0 +1,52 @@
+{
+  "version": "1.0",
+  "task_id": "",
+  "group_id": "",
+  "status": "",
+  "dimension_results": [
+    {
+      "dimension": "Core Criteria Preservation",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "dimension": "Added Criteria Justification",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "dimension": "Breadth And Depth Correctness",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "dimension": "Depth Discrimination",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "dimension": "Node Count And Coverage",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "dimension": "End-To-End Compliance",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "dimension": "Depth Enhancement Quality",
+      "status": "",
+      "evidence": "",
+      "suggestion": null
+    }
+  ],
+  "required_changes": [],
+  "summary": ""
+}

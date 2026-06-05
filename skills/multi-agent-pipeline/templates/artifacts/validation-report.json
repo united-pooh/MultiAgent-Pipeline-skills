@@ -1,0 +1,15 @@
+{
+  "version": "1.0",
+  "group_id": "",
+  "iteration": 0,
+  "detected_language": "",
+  "status": "",
+  "commands_run": [],
+  "test_summary": {
+    "total": 0,
+    "passed": 0,
+    "failed": 0,
+    "skipped": 0
+  },
+  "blocking_failures": []
+}

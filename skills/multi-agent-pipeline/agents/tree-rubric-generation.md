@@ -17,6 +17,10 @@ Generate `tree_rubrics.json` for the scoped worker-group task. The rubric must s
 
 Return exactly one fenced `json` block containing `tree_rubrics.json`.
 
+Use `templates/artifacts/tree-rubrics.json` as the JSON skeleton. Fill semantic
+fields from the classification and task scope; do not leave template blanks in
+the returned artifact.
+
 ## Rules
 
 - First enumerate candidate criteria from the task requirements and acceptance criteria.

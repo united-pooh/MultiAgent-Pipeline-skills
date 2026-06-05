@@ -14,6 +14,7 @@ import {
   aggregateReviewFeedback,
   aggregateTreeGradingFeedback,
   createCodexPetEvent,
+  formatConventionalGitmojiCommitMessage,
   loadStageCatalog,
   runComplexityHook,
   validateArtifact,
@@ -516,6 +517,7 @@ async function createRepoFixture() {
   const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "pipeline-repo-"));
   await copyTree(path.join(fixtureSourceRoot, "agents"), path.join(repoRoot, "agents"));
   await copyTree(path.join(fixtureSourceRoot, "references"), path.join(repoRoot, "references"));
+  await copyTree(path.join(fixtureSourceRoot, "templates"), path.join(repoRoot, "templates"));
   await fs.mkdir(path.join(repoRoot, "src"), { recursive: true });
   await fs.writeFile(path.join(repoRoot, "src", "app.txt"), "base\n", "utf8");
   await fs.writeFile(
@@ -668,6 +670,22 @@ class ConflictOnceMergeEngine {
         status: "merged",
         conflicts: [],
       },
+    };
+  }
+}
+
+class RecordingGitAutomation {
+  constructor() {
+    this.calls = [];
+  }
+
+  async commitAndMaybePush(options) {
+    this.calls.push(options);
+    return {
+      status: "committed",
+      pushed: options.push === true,
+      remote: options.remote,
+      branch: options.branch ?? "codex/test",
     };
   }
 }
@@ -920,6 +938,258 @@ test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => 
     assert.equal(profile.reasoningEffort, "xhigh", `grader-${graderId}`);
     assert.equal(profile.serviceTier, "priority", `grader-${graderId}`);
   }
+});
+
+test("git commit formatter keeps conventional commits with gitmoji and Chinese text", async () => {
+  const message = formatConventionalGitmojiCommitMessage({
+    type: "feat",
+    scope: "pipeline",
+    gitmoji: ":sparkles:",
+    description: "完成流水线交付",
+    body: ["阶段: Cleanup", "运行: RUN-TEST-GIT"],
+  });
+
+  assert.match(message, /^feat\(pipeline\): :sparkles: 完成流水线交付\n\n/);
+  assert.match(message, /阶段: Cleanup/);
+  assert.match(message, /运行: RUN-TEST-GIT/);
+});
+
+test("git publication is opt-in and publishes doc plus cleanup checkpoints", async () => {
+  const repoRoot = await createRepoFixture();
+  const store = new ArtifactStore({ repoRoot });
+  await store.initializeRun();
+
+  const docProposalDir = await createProposalDir({
+    "CHANGELOG.md": "## Unreleased\n- Added git publication rules.\n",
+  });
+  const runner = new ScriptedStageRunner({
+    doc: {
+      rawOutput: jsonBlock(makeDocArtifact("updated")),
+      proposal: {
+        ref: "worker://DOCS/iteration-1",
+        path: docProposalDir,
+      },
+    },
+  });
+  const disabledGit = new RecordingGitAutomation();
+  const disabledOrchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    gitAutomation: disabledGit,
+  });
+
+  assert.deepEqual(await disabledOrchestrator.runGitPublication("cleanup"), {
+    status: "disabled",
+  });
+  assert.equal(disabledGit.calls.length, 0);
+
+  const enabledGit = new RecordingGitAutomation();
+  const mergeEngine = new SerialAssertingMergeEngine({ repoRoot, artifactStore: store });
+  const enabledOrchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    mergeEngine,
+    gitAutomation: enabledGit,
+    gitPolicy: {
+      enabled: true,
+      doc: { push: true },
+      cleanup: { push: true },
+    },
+  });
+
+  await enabledOrchestrator.runDocStage({
+    runId: "RUN-TEST-GIT",
+    spec: makeSpecArtifact(),
+    architecture: makeArchitectureArtifact(),
+    executionResults: [],
+    complexityReports: [],
+  });
+  await enabledOrchestrator.finishRun({
+    runId: "RUN-TEST-GIT",
+    spec: makeSpecArtifact(),
+    plan: makePlanArtifact(),
+    dispatch: makeDispatchArtifact([]),
+    groupStates: new Map(),
+    finalAssessment: makeFinalAssessmentArtifact(),
+  });
+
+  assert.equal(enabledGit.calls.length, 2);
+  assert.match(enabledGit.calls[0].message, /^docs\(pipeline\): :memo: 更新流水线交付文档/);
+  assert.deepEqual(enabledGit.calls[0].paths, ["CHANGELOG.md"]);
+  assert.equal(enabledGit.calls[0].push, true);
+  assert.match(enabledGit.calls[1].message, /^feat\(pipeline\): :sparkles: 完成流水线交付/);
+  assert.deepEqual(enabledGit.calls[1].paths, []);
+  assert.equal(enabledGit.calls[1].push, true);
+  await assert.rejects(fs.access(path.join(repoRoot, ".pipeline-workspace")));
+});
+
+test("stage catalog exposes artifact templates for every stage profile", async () => {
+  const catalog = loadStageCatalog(fixtureSourceRoot);
+  const stages = [
+    "spec",
+    "plan",
+    "architecture",
+    "dispatch",
+    "execution",
+    "validation",
+    "tree-classification",
+    "tree-rubric-generation",
+    "tree-rubric-verification",
+    "tree-rubric-refinement",
+    "tree-grading",
+    "review",
+    "qa",
+    "doc",
+    "final-assessment",
+  ];
+
+  for (const stage of stages) {
+    const request = await catalog.buildStageRequest(stage, {
+      workerGroup: {
+        group_id: "GROUP-1",
+        required_skills: [],
+      },
+      iteration: 1,
+      graderId: 1,
+      reviewerId: 1,
+    });
+
+    assert.ok(request.artifactTemplate, `${stage} should include an artifact template`);
+    assert.match(request.artifactTemplate.relativePath, /^templates\/artifacts\/.+\.json$/);
+    assert.equal(typeof request.artifactTemplate.artifact, "object", stage);
+    await fs.access(path.resolve(fixtureSourceRoot, request.artifactTemplate.relativePath));
+  }
+});
+
+test("artifact templates materialize deterministic execution fields before validation", async () => {
+  const repoRoot = await createRepoFixture();
+  const proposalDir = await createProposalDir({
+    "src/app.txt": "implemented\n",
+  });
+  const workerGroup = {
+    group_id: "GROUP-LOW-CONTEXT",
+    tasks: ["TASK-001"],
+    owned_files: ["src/app.txt"],
+    depends_on_groups: [],
+    required_skills: [],
+  };
+  const runner = new ScriptedStageRunner({
+    "execution:GROUP-LOW-CONTEXT:iteration-2": {
+      proposal: {
+        ref: "worker://GROUP-LOW-CONTEXT/iteration-2",
+        path: proposalDir,
+      },
+      rawOutput: jsonBlock({
+        status: "implemented",
+        applied_skills: [],
+        changed_files: ["src/app.txt"],
+        requirements_covered: ["REQ-001"],
+        frontend_design_summary: null,
+        tests_run: [],
+        follow_up_notes: [],
+        blockers: [],
+      }),
+    },
+  });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    maxStageRetries: 0,
+  });
+
+  const result = await orchestrator.runStage(
+    "execution",
+    {
+      workerGroup,
+      baseRef: "bases/wave-1-group-low-context-base.json",
+      iteration: 2,
+    },
+    {
+      requiredSkills: [],
+    },
+  );
+
+  assert.equal(result.artifact.version, "1.0");
+  assert.equal(result.artifact.group_id, "GROUP-LOW-CONTEXT");
+  assert.equal(result.artifact.iteration, 2);
+  assert.equal(result.artifact.base_ref, "bases/wave-1-group-low-context-base.json");
+  assert.equal(result.artifact.proposal_ref, "worker://GROUP-LOW-CONTEXT/iteration-2");
+});
+
+test("artifact templates fill fixed dimension labels but still require semantic values", async () => {
+  const repoRoot = await createRepoFixture();
+  const runner = new ScriptedStageRunner({
+    "final-assessment": {
+      rawOutput: jsonBlock({
+        verdict: "accept",
+        dimension_scores: [
+          { score: "strong", evidence: "Requirements are complete." },
+          { score: "strong", evidence: "Implementation is clear." },
+          { score: "adequate", evidence: "Architecture is aligned." },
+          { score: "adequate", evidence: "Tests cover the main flow." },
+          { score: "strong", evidence: "Documentation is accurate." },
+          { score: "strong", evidence: "The result is cohesive." },
+        ],
+        improvement_areas: [],
+        restart_from: null,
+        restart_rationale: null,
+        skill_usage_summary: [
+          {
+            scope: "spec",
+            required_skills: ["superpowers"],
+            applied_skills: ["superpowers"],
+            issues: [],
+          },
+        ],
+        readability_conclusion: "high",
+        complexity_conclusion: "low",
+        complexity_summary: "Complexity reports show low complexity.",
+        summary: "Accepted.",
+      }),
+    },
+  });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    maxStageRetries: 0,
+  });
+
+  const result = await orchestrator.runStage("final-assessment", {
+    previousAssessments: [],
+  });
+
+  assert.equal(result.artifact.iteration, 1);
+  assert.deepEqual(
+    result.artifact.dimension_scores.map((entry) => entry.dimension),
+    [
+      "Requirement Completeness",
+      "Implementation Quality",
+      "Architectural Soundness",
+      "Test Confidence",
+      "Documentation Accuracy",
+      "Overall Cohesion",
+    ],
+  );
+
+  const failingRunner = new ScriptedStageRunner({
+    plan: {
+      rawOutput: jsonBlock({
+        risk_items: ["The model omitted semantic planning arrays."],
+      }),
+    },
+  });
+  const failingOrchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: failingRunner,
+    maxStageRetries: 0,
+  });
+
+  await assert.rejects(
+    () => failingOrchestrator.runStage("plan", {}),
+    /phases must contain at least 1 item/,
+  );
 });
 
 test("OpenCode expert profiles use task invocation without Codex-only spawn fields", async () => {

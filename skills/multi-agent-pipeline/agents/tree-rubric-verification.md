@@ -17,6 +17,10 @@ Verify whether `tree_rubrics.json` is specific, end-to-end compliant, and correc
 
 Return exactly one fenced `json` block containing `validation_result.json`.
 
+Use `templates/artifacts/tree-rubric-verification.json` as the JSON skeleton.
+Fill semantic fields from rubric verification; do not leave template blanks in
+the returned artifact.
+
 ## Required Dimensions
 
 Evaluate exactly these seven dimensions in order:

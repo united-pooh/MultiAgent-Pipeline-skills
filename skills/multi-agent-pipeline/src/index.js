@@ -1,5 +1,10 @@
 export { ArtifactStore } from "./runtime/artifact-store.js";
 export {
+  deterministicArtifactFields,
+  materializeArtifactFromTemplate,
+  mergeTemplateValues,
+} from "./runtime/artifact-templates.js";
+export {
   DEFAULT_CODEX_STAGE_PROFILES,
   DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES,
   DEFAULT_STAGE_PROFILES,
@@ -15,6 +20,13 @@ export {
   PipelineRejectedError,
   StageExecutionError,
 } from "./runtime/errors.js";
+export {
+  DEFAULT_GITMOJI_BY_TYPE,
+  DEFAULT_GIT_PUBLICATION_POLICY,
+  formatConventionalGitmojiCommitMessage,
+  GitAutomation,
+  normalizeGitPublicationPolicy,
+} from "./runtime/git-automation.js";
 export { MergeEngine } from "./runtime/merge-engine.js";
 export { CODEX_PET_STATES, createCodexPetEvent } from "./runtime/pet-events.js";
 export { PipelineOrchestrator } from "./runtime/pipeline-orchestrator.js";

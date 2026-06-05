@@ -1,0 +1,45 @@
+{
+  "version": "1.0",
+  "iteration": 1,
+  "verdict": "",
+  "dimension_scores": [
+    {
+      "dimension": "Requirement Completeness",
+      "score": "",
+      "evidence": ""
+    },
+    {
+      "dimension": "Implementation Quality",
+      "score": "",
+      "evidence": ""
+    },
+    {
+      "dimension": "Architectural Soundness",
+      "score": "",
+      "evidence": ""
+    },
+    {
+      "dimension": "Test Confidence",
+      "score": "",
+      "evidence": ""
+    },
+    {
+      "dimension": "Documentation Accuracy",
+      "score": "",
+      "evidence": ""
+    },
+    {
+      "dimension": "Overall Cohesion",
+      "score": "",
+      "evidence": ""
+    }
+  ],
+  "improvement_areas": [],
+  "restart_from": null,
+  "restart_rationale": null,
+  "skill_usage_summary": [],
+  "readability_conclusion": "",
+  "complexity_conclusion": "",
+  "complexity_summary": "",
+  "summary": ""
+}

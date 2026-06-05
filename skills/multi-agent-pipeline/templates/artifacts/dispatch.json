@@ -1,0 +1,14 @@
+{
+  "version": "1.0",
+  "spec_ref": "spec.json",
+  "plan_ref": "plan.json",
+  "architecture_ref": "architecture.json",
+  "worker_groups": [],
+  "execution_waves": [],
+  "integration_strategy": {
+    "merge_mode": "three_way",
+    "conflict_policy": "pause_for_human",
+    "base_strategy": "wave_start_snapshot"
+  },
+  "rationale": ""
+}

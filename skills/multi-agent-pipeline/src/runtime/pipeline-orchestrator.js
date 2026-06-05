@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
+import { materializeArtifactFromTemplate } from "./artifact-templates.js";
 import { ArtifactStore } from "./artifact-store.js";
 import { runComplexityHook } from "./complexity-hook.js";
 import {
@@ -16,6 +17,11 @@ import {
   PipelineRejectedError,
   StageExecutionError,
 } from "./errors.js";
+import {
+  formatConventionalGitmojiCommitMessage,
+  GitAutomation,
+  normalizeGitPublicationPolicy,
+} from "./git-automation.js";
 import { MergeEngine } from "./merge-engine.js";
 import { createCodexPetEvent } from "./pet-events.js";
 import { loadStageCatalog } from "./stage-catalog.js";
@@ -325,6 +331,51 @@ function buildRunSummary({
   };
 }
 
+function stageLabelForGitPublication(phase) {
+  return phase === "doc" ? "Documentation" : "Cleanup";
+}
+
+function pathsForGitPublication(phasePolicy, context) {
+  if (Array.isArray(phasePolicy.paths)) {
+    return uniqueStrings(phasePolicy.paths.filter(Boolean));
+  }
+
+  if (phasePolicy.paths === "updated_files") {
+    return uniqueStrings((context.updatedFiles ?? []).filter(Boolean));
+  }
+
+  if (phasePolicy.paths === "all") {
+    return [];
+  }
+
+  return [];
+}
+
+function buildGitPublicationMessage(phase, phasePolicy, context) {
+  if (phasePolicy.message) {
+    return `${String(phasePolicy.message).trimEnd()}\n`;
+  }
+
+  const body = [
+    `阶段: ${stageLabelForGitPublication(phase)}`,
+    context.runId ? `运行: ${context.runId}` : null,
+    context.finalAssessment?.verdict ? `最终评估: ${context.finalAssessment.verdict}` : null,
+    (context.updatedFiles ?? []).length > 0
+      ? `文件: ${uniqueStrings(context.updatedFiles).join(", ")}`
+      : null,
+    ...(phasePolicy.body ?? []),
+  ].filter(Boolean);
+
+  return formatConventionalGitmojiCommitMessage({
+    type: phasePolicy.type,
+    scope: phasePolicy.scope,
+    gitmoji: phasePolicy.gitmoji,
+    description: phasePolicy.description,
+    body,
+    footers: phasePolicy.footers ?? [],
+  });
+}
+
 export class PipelineOrchestrator {
   constructor({
     repoRoot,
@@ -339,6 +390,8 @@ export class PipelineOrchestrator {
     stageCatalog = null,
     mergeEngine = null,
     complexityHook = runComplexityHook,
+    gitPolicy = null,
+    gitAutomation = null,
   }) {
     if (!repoRoot) {
       throw new Error("PipelineOrchestrator requires repoRoot");
@@ -360,6 +413,10 @@ export class PipelineOrchestrator {
     this.stageCatalog = stageCatalog ?? loadStageCatalog(repoRoot);
     this.mergeEngine = mergeEngine ?? new MergeEngine({ repoRoot, artifactStore: this.artifactStore });
     this.complexityHook = complexityHook;
+    this.gitPublicationPolicy = normalizeGitPublicationPolicy(gitPolicy);
+    this.gitAutomation = gitAutomation ?? (
+      this.gitPublicationPolicy.enabled ? new GitAutomation({ repoRoot }) : null
+    );
     this.codexPetEvents = [];
   }
 
@@ -421,6 +478,7 @@ export class PipelineOrchestrator {
 
       this.initializeGroupStates(dispatch, groupStates);
       ({ finalAssessment } = await this.continueFromDispatch({
+        runId,
         spec,
         plan,
         architecture,
@@ -497,6 +555,7 @@ export class PipelineOrchestrator {
       });
 
       ({ finalAssessment } = await this.continueFromDispatch({
+        runId,
         spec,
         plan,
         architecture,
@@ -563,7 +622,7 @@ export class PipelineOrchestrator {
     return groupStates;
   }
 
-  async continueFromDispatch({ spec, plan, architecture, dispatch, groupStates }) {
+  async continueFromDispatch({ runId, spec, plan, architecture, dispatch, groupStates }) {
     for (const wave of dispatch.execution_waves) {
       await this.artifactStore.appendLog(`wave ${wave.wave} processing ${wave.groups.join(", ")}`);
       const waveStates = wave.groups.map((groupId) => {
@@ -647,6 +706,7 @@ export class PipelineOrchestrator {
     }
 
     const docReport = await this.runDocStage({
+      runId,
       spec,
       architecture,
       executionResults: [...groupStates.values()].map((state) => state.finalExecution.artifact),
@@ -723,6 +783,11 @@ export class PipelineOrchestrator {
 
     if (shouldDeleteWorkspace) {
       await this.artifactStore.cleanupWorkspace();
+      await this.runGitPublication("cleanup", {
+        runId,
+        spec,
+        finalAssessment,
+      });
     }
 
     return {
@@ -784,6 +849,58 @@ export class PipelineOrchestrator {
     };
   }
 
+  async runGitPublication(phase, context = {}) {
+    if (!this.gitPublicationPolicy.enabled) {
+      return {
+        status: "disabled",
+      };
+    }
+
+    const phasePolicy = this.gitPublicationPolicy[phase];
+    if (!phasePolicy?.enabled || phasePolicy.commit === false) {
+      return {
+        status: "disabled",
+      };
+    }
+
+    if (!this.gitAutomation) {
+      throw new Error("Git publication is enabled but no GitAutomation adapter is configured");
+    }
+
+    const message = buildGitPublicationMessage(phase, phasePolicy, context);
+    const paths = pathsForGitPublication(phasePolicy, context);
+
+    try {
+      const result = await this.gitAutomation.commitAndMaybePush({
+        message,
+        paths,
+        push: phasePolicy.push === true,
+        remote: phasePolicy.remote ?? this.gitPublicationPolicy.remote,
+        branch: phasePolicy.branch,
+      });
+      if (await this.artifactStore.workspaceExists()) {
+        await this.artifactStore.appendLog(
+          `git ${phase} publication ${result.status}${result.pushed ? " and pushed" : ""}`,
+        );
+      }
+      return result;
+    } catch (error) {
+      if (await this.artifactStore.workspaceExists()) {
+        await this.artifactStore.appendLog(`git ${phase} publication failed: ${error.message}`);
+      }
+
+      const failureMode = phasePolicy.failureMode ?? this.gitPublicationPolicy.failureMode;
+      if (failureMode === "log") {
+        return {
+          status: "failed",
+          error: error.message,
+        };
+      }
+
+      throw error;
+    }
+  }
+
   async runRootStage(stage, context, validationContext = {}) {
     const result = await this.runStage(stage, context, validationContext);
     await this.artifactStore.writeRootArtifact(stage === "doc" ? "doc-report" : stage, result.artifact);
@@ -811,7 +928,15 @@ export class PipelineOrchestrator {
           attempt,
         });
         const stageExecution = await this.stageRunner.runStage(request);
-        const artifact = this.normalizeStageArtifact(stageExecution, artifactType, validationContext);
+        const artifact = this.normalizeStageArtifact(
+          stageExecution,
+          artifactType,
+          validationContext,
+          {
+            artifactTemplate: request.artifactTemplate?.artifact ?? null,
+            context,
+          },
+        );
         await this.artifactStore.appendLog(`${stage} succeeded on attempt ${attempt}`);
         return {
           request,
@@ -833,7 +958,12 @@ export class PipelineOrchestrator {
     throw new StageExecutionError(stage, lastError?.message ?? "unknown stage failure");
   }
 
-  normalizeStageArtifact(stageExecution, artifactType, validationContext) {
+  normalizeStageArtifact(
+    stageExecution,
+    artifactType,
+    validationContext,
+    { artifactTemplate = null, context = {} } = {},
+  ) {
     if (!stageExecution || typeof stageExecution !== "object") {
       throw new ContractValidationError(artifactType, "stage execution result must be an object");
     }
@@ -842,7 +972,17 @@ export class PipelineOrchestrator {
       stageExecution.artifact !== undefined
         ? stageExecution.artifact
         : extractSingleJsonBlock(stageExecution.rawOutput);
-    return validateArtifact(artifactType, payload, validationContext);
+    const materialized = materializeArtifactFromTemplate({
+      artifactType,
+      template: artifactTemplate,
+      values: stageExecution.artifactPatch ?? payload,
+      context: {
+        ...context,
+        ...validationContext,
+      },
+      stageExecution,
+    });
+    return validateArtifact(artifactType, materialized, validationContext);
   }
 
   async createBaseRef({ wave, groupId, iteration }) {
@@ -1453,7 +1593,7 @@ export class PipelineOrchestrator {
     };
   }
 
-  async runDocStage({ spec, architecture, executionResults, complexityReports }) {
+  async runDocStage({ runId, spec, architecture, executionResults, complexityReports }) {
     const docResult = await this.runStage("doc", {
       spec,
       architecture,
@@ -1486,6 +1626,12 @@ export class PipelineOrchestrator {
           iteration: 1,
         });
       }
+
+      await this.runGitPublication("doc", {
+        runId,
+        spec,
+        updatedFiles: docResult.artifact.updated_files,
+      });
     }
 
     return docResult.artifact;

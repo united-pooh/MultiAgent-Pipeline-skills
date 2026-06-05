@@ -19,6 +19,10 @@ Score every rubric node as 0 or 1 using only the task/spec, `tree_rubrics_refine
 
 Return exactly one fenced `json` block containing `tree_grading_individual_N.json`.
 
+Use `templates/artifacts/tree-grading-individual.json` as the JSON skeleton.
+Fill semantic fields from final output file evidence; do not leave template
+blanks in the returned artifact.
+
 ## Rules
 
 - Do not use execution reports, validation reports, merge reports, logs, tool traces, retry history, or agent behavior.

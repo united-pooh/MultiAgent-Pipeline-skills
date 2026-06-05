@@ -5,6 +5,8 @@ Use these templates as default host-specific stage prompt scaffolds. Fill the pl
 ## Global Rules
 
 - Always name the stage and the expected artifact.
+- Include the current stage's `templates/artifacts/<artifact>.json` path as the
+  JSON skeleton alongside `references/contracts.md`.
 - Pass artifact JSON inline when the subagent needs exact content; otherwise pass exact repo-relative or absolute paths.
 - Tell the subagent to return exactly one fenced `json` block and no extra prose, except for the Spec stage, which returns two blocks: one `json` and one `markdown`.
 - For retries or rework passes, name the triggering artifact and the current iteration.
@@ -636,6 +638,7 @@ Inputs:
 - Repo root: <repo_root>
 
 Update only the documentation that should change, including `CHANGELOG.md` when the repository has one.
+Do not commit or push; the orchestrator owns optional Git publication after integration.
 Return exactly one fenced `json` block with `doc-report.json` and no extra prose.
 ```
 

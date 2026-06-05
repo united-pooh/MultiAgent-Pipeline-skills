@@ -12,6 +12,14 @@ function cloneReference(reference) {
   return { ...reference };
 }
 
+function parseJsonReference(reference) {
+  try {
+    return JSON.parse(reference.contents);
+  } catch (error) {
+    throw new Error(`Invalid JSON in ${reference.relativePath}: ${error.message}`);
+  }
+}
+
 export function resolveDefaultSkillPaths({ codexHome = defaultCodexHome(), overrides = {} } = {}) {
   return {
     superpowers: path.join(codexHome, SKILL_RELATIVE_PATHS.superpowers),
@@ -75,6 +83,9 @@ export class StageCatalog {
     const references = await Promise.all(
       (profile.referenceFiles ?? []).map((referencePath) => this.readRelativeFile(referencePath)),
     );
+    const artifactTemplate = profile.artifactTemplateFile
+      ? await this.readRelativeFile(profile.artifactTemplateFile)
+      : null;
 
     return {
       stage,
@@ -82,6 +93,12 @@ export class StageCatalog {
       profile,
       prompt: cloneReference(prompt),
       references: references.map(cloneReference),
+      artifactTemplate: artifactTemplate
+        ? {
+            ...cloneReference(artifactTemplate),
+            artifact: parseJsonReference(artifactTemplate),
+          }
+        : null,
       requiredSkills: this.resolveRequiredSkills(stage, context),
       context: { ...context },
       repoRoot: this.repoRoot,

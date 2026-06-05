@@ -20,62 +20,77 @@ const STAGE_FILES = Object.freeze({
   spec: {
     promptFile: "agents/spec.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/spec.json",
   },
   plan: {
     promptFile: "agents/plan.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/plan.json",
   },
   architecture: {
     promptFile: "agents/architecture.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/architecture.json",
   },
   dispatch: {
     promptFile: "agents/dispatch.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/dispatch.json",
   },
   execution: {
     promptFile: "agents/execution.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/execution-report.json",
   },
   validation: {
     promptFile: "agents/validation.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/validation-report.json",
   },
   "tree-classification": {
     promptFile: "agents/tree-classification.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/tree-classification.json",
   },
   "tree-rubric-generation": {
     promptFile: "agents/tree-rubric-generation.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/tree-rubrics.json",
   },
   "tree-rubric-verification": {
     promptFile: "agents/tree-rubric-verification.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/tree-rubric-verification.json",
   },
   "tree-rubric-refinement": {
     promptFile: "agents/tree-rubric-refinement.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/tree-rubrics-refined.json",
   },
   "tree-grading": {
     promptFile: "agents/tree-grading.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/tree-grading-individual.json",
   },
   review: {
     promptFile: "agents/review.md",
     referenceFiles: ["references/contracts.md", "references/pre-rubric.md"],
+    artifactTemplateFile: "templates/artifacts/review-individual.json",
   },
   qa: {
     promptFile: "agents/qa.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/qa-report.json",
   },
   doc: {
     promptFile: "agents/doc.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/doc-report.json",
   },
   "final-assessment": {
     promptFile: "agents/final-assessment.md",
     referenceFiles: ["references/contracts.md"],
+    artifactTemplateFile: "templates/artifacts/final-assessment.json",
   },
 });
 

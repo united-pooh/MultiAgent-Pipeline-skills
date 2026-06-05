@@ -20,10 +20,15 @@ Perform a strict Pointwise Rubric Evaluation and return one `review_individual_N
 - `references/contracts.md`
 - `references/pre-rubric.md`
 - A reviewer ID from the orchestrator
+- `templates/artifacts/review-individual.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing a `review_individual_N.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/review-individual.json` as the JSON skeleton. Fill
+semantic fields from the legacy PRE review evidence; do not leave template
+blanks in the returned artifact.
 
 ## Rules
 

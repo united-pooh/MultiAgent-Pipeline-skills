@@ -52,6 +52,8 @@ flowchart LR
 | 分组实现 | Dispatch 按文件所有权和依赖拆分 worker group，减少并行冲突 |
 | 保守合并 | Merge 由 orchestrator 本地执行，使用三向合并语义，冲突时暂停给人处理 |
 | 多语言验证 | Validation 根据项目标记自动选择 Go、Python、JavaScript/TypeScript、Rust、Java、Ruby 的 fix/check 命令 |
+| 产物模板 | 每个 stage 有 `templates/artifacts/` JSON 骨架，runtime 会先填确定字段再交给 contract validator |
+| Git 自动发布 | 可选 `gitPolicy` 让 Doc/Cleanup 阶段由 orchestrator 自动生成 gitmoji + Conventional Commits 中文提交并按策略 push |
 | Tree Rubrics 评分 | 每个 group 生成分类、初版 rubric、验证结果和 refined rubric，再对最终输出文件评分 |
 | 端到端评分 | Tree Grading 只看 `spec`、`tree_rubrics_refined.json` 和 `final-output-files.json`，不看过程日志或 agent 行为 |
 | Codex pet 事件 | Runtime 会输出 `codex_pet_events`，把 pipeline 阶段映射到 `running`、`review`、`failed`、`waiting`、`waving` 等 Codex avatar state |
@@ -87,6 +89,10 @@ skills/multi-agent-pipeline/
 │   ├── workspace-and-events.md
 │   └── example-run.md
 ├── templates/
+│   ├── artifacts/
+│   │   ├── spec.json
+│   │   ├── execution-report.json
+│   │   └── ...
 │   └── opencode-expert-agent.md
 ├── src/runtime/
 └── test/
@@ -147,6 +153,35 @@ skills/multi-agent-pipeline/
 | `references/orchestration-rules.md` | prompt、artifact、review、merge、cleanup 纪律 |
 
 OpenCode 只需要先看到 frontmatter 的 `name` 和 `description`；加载技能后，也应按当前阶段读取对应 reference 或 `agents/<stage>.md`，不要一次性读取整套手册。
+
+## 产物模板
+
+`templates/artifacts/` 保存每个 stage 输出 JSON 的骨架。StageCatalog 会把当前 stage 的模板放进 stage request，PipelineOrchestrator 在 `validateArtifact()` 前会把模型输出、模板和确定性上下文字段合并。
+
+模板只负责结构稳定性和确定字段，例如 `version`、`spec_ref`、`group_id`、`iteration`、固定评分维度和固定 merge strategy。需求、任务、evidence、测试结果、QA 结论和最终验收结论仍然必须由 stage 输出提供，并继续接受 `references/contracts.md` 对应 validator 的校验。
+
+## Git 自动发布
+
+`PipelineOrchestrator` 支持可选 `gitPolicy`。默认不启用，因此普通运行不会执行任何 git 命令；启用后只在 orchestrator 本地阶段发布：
+
+- Doc：文档 proposal 合并成功后提交 `doc-report.updated_files`，默认 `docs(pipeline): :memo: 更新流水线交付文档`，默认不 push。
+- Cleanup：最终评估 `accept` 且 `.pipeline-workspace/` 清理完成后提交最终工作树，默认 `feat(pipeline): :sparkles: 完成流水线交付`，默认 push 到 `origin` 当前分支。
+- 子 agent 不允许 commit 或 push。提交信息保持 `type(scope): :gitmoji: 中文描述`，兼容 Conventional Commits。
+
+示例：
+
+```js
+const orchestrator = new PipelineOrchestrator({
+  repoRoot,
+  stageRunner,
+  gitPolicy: {
+    enabled: true,
+    remote: "origin",
+    doc: { push: true },
+    cleanup: { push: true },
+  },
+});
+```
 
 ## OpenCode 专家模式
 

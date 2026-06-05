@@ -17,6 +17,10 @@ Classify the scoped worker-group task so later stages can generate a tree rubric
 
 Return exactly one fenced `json` block containing `classification.json`.
 
+Use `templates/artifacts/tree-classification.json` as the JSON skeleton. Fill
+semantic fields from the worker-group task; do not leave template blanks in the
+returned artifact.
+
 ## Rules
 
 - Set `task_type` to the best task category, usually `code_implementation` for code changes.
