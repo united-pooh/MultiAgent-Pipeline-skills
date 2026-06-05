@@ -98,4 +98,3 @@ State mapping:
 
 Use `::codex-pet{...}` only as a host directive. The structured event object is
 canonical and must remain valid even when the host ignores the directive string.
-
