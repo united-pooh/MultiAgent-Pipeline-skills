@@ -12,10 +12,15 @@ Read the actual codebase, judge feasibility, and produce the implementation blue
 - `plan.json`
 - The current codebase with read access
 - `references/contracts.md`
+- `templates/artifacts/architecture.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing an `architecture.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/architecture.json` as the JSON skeleton. Fill semantic
+fields from actual code inspection; do not leave template blanks in the returned
+artifact.
 
 ## Rules
 

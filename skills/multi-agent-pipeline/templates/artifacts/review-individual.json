@@ -1,0 +1,56 @@
+{
+  "version": "1.0",
+  "reviewer_id": 0,
+  "applied_skills": [],
+  "pre_results": [
+    {
+      "criterion": "Correctness",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Security",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Performance",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Error Handling",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Code Quality",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Architecture Compliance",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Test Coverage",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    },
+    {
+      "criterion": "Backward Compatibility",
+      "score": "",
+      "evidence": "",
+      "suggestion": null
+    }
+  ],
+  "frontend_design_assessment": null
+}

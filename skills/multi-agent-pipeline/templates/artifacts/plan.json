@@ -1,0 +1,8 @@
+{
+  "version": "1.0",
+  "applied_skills": ["superpowers"],
+  "spec_ref": "spec.json",
+  "phases": [],
+  "execution_order": [],
+  "risk_items": []
+}

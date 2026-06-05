@@ -18,6 +18,10 @@ Produce `tree_rubrics_refined.json` by applying valid verification feedback to `
 
 Return exactly one fenced `json` block containing `tree_rubrics_refined.json`.
 
+Use `templates/artifacts/tree-rubrics-refined.json` as the JSON skeleton. Fill
+semantic fields from the verification feedback; do not leave template blanks in
+the returned artifact.
+
 ## Rules
 
 - Apply the minimum necessary changes.

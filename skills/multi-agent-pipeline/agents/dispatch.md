@@ -12,10 +12,15 @@ Analyze the task dependency graph and file ownership map to partition work into 
 - `plan.json`
 - `architecture.json`
 - `references/contracts.md`
+- `templates/artifacts/dispatch.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing a `dispatch.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/dispatch.json` as the JSON skeleton. Fill semantic
+fields from the dependency and ownership analysis; do not leave template blanks
+in the returned artifact.
 
 ## Grouping Algorithm
 

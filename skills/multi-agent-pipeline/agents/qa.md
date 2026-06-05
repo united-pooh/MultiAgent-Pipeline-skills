@@ -17,10 +17,14 @@ Perform dynamic testing on a worker group's approved changes. Run tests, simulat
 - `merge-report.json` (for the relevant worker group)
 - The current codebase with the worker's approved changes applied
 - `references/contracts.md`
+- `templates/artifacts/qa-report.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing a `qa-report.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/qa-report.json` as the JSON skeleton. Fill semantic
+fields from QA evidence; do not leave template blanks in the returned artifact.
 
 ## Rules
 

@@ -13,6 +13,7 @@ Read `design.md` (the brainstorming output) and produce two artifacts:
 - `design.md` content, passed inline by the orchestrator
 - Optional local context from the orchestrator
 - `references/contracts.md`
+- `templates/artifacts/spec.json`
 
 ## Output
 
@@ -20,6 +21,9 @@ Return exactly two fenced blocks and no extra prose:
 
 1. A `json` block containing the `spec.json` payload matching the contract in `references/contracts.md`
 2. A `markdown` block containing the `spec.md` payload
+
+Use `templates/artifacts/spec.json` as the JSON skeleton. Fill semantic fields
+from the design; do not leave template blanks in the returned artifact.
 
 ## Planning Skill Requirement
 

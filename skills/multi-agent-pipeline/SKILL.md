@@ -39,6 +39,8 @@ load cheaply, then read only the files needed for the current stage.
   `references/orchestration-rules.md`.
 - For subagent prompts, read only the current `agents/<stage>.md`.
 - For artifact shapes, read `references/contracts.md`.
+- For nearby JSON skeletons, read only the current
+  `templates/artifacts/<artifact>.json`.
 - For legacy PRE review scoring, read `references/pre-rubric.md` only when
   explicitly using the deprecated Review stage.
 - For runnable prompt scaffolds, read `references/orchestrator-prompts.md`.
@@ -127,28 +129,30 @@ the active quality gate is Tree Rubrics plus Tree Grading.
 - QA must pass before Documentation and Final Assessment.
 - Accepted runs write `.pipeline-last-run-summary.json` and remove
   `.pipeline-workspace/`; rejected or paused runs keep the workspace.
+- Git publication is opt-in and orchestrator-local; subagents must not commit
+  or push.
 
 ## Stage Files
 
 Read the current stage prompt just before spawning or running that stage:
 
-| Stage | File | Required extra reference |
-|---|---|---|
-| Spec | `agents/spec.md` | `references/contracts.md` |
-| Plan | `agents/plan.md` | `references/contracts.md` |
-| Architecture | `agents/architecture.md` | `references/contracts.md` |
-| Dispatch | `agents/dispatch.md` | `references/contracts.md` |
-| Execution | `agents/execution.md` | `references/contracts.md` |
-| Validation | `agents/validation.md` | `references/contracts.md` |
-| Tree Classification | `agents/tree-classification.md` | `references/contracts.md` |
-| Tree Rubric Generation | `agents/tree-rubric-generation.md` | `references/contracts.md` |
-| Tree Rubric Verification | `agents/tree-rubric-verification.md` | `references/contracts.md` |
-| Tree Rubric Refinement | `agents/tree-rubric-refinement.md` | `references/contracts.md` |
-| Tree Grading | `agents/tree-grading.md` | `references/contracts.md` |
-| QA | `agents/qa.md` | `references/contracts.md` |
-| Documentation | `agents/doc.md` | `references/contracts.md` |
-| Final Assessment | `agents/final-assessment.md` | `references/contracts.md` |
-| Legacy Review | `agents/review.md` | `references/contracts.md`, `references/pre-rubric.md` |
+| Stage | File | Required extra reference | Template |
+|---|---|---|---|
+| Spec | `agents/spec.md` | `references/contracts.md` | `templates/artifacts/spec.json` |
+| Plan | `agents/plan.md` | `references/contracts.md` | `templates/artifacts/plan.json` |
+| Architecture | `agents/architecture.md` | `references/contracts.md` | `templates/artifacts/architecture.json` |
+| Dispatch | `agents/dispatch.md` | `references/contracts.md` | `templates/artifacts/dispatch.json` |
+| Execution | `agents/execution.md` | `references/contracts.md` | `templates/artifacts/execution-report.json` |
+| Validation | `agents/validation.md` | `references/contracts.md` | `templates/artifacts/validation-report.json` |
+| Tree Classification | `agents/tree-classification.md` | `references/contracts.md` | `templates/artifacts/tree-classification.json` |
+| Tree Rubric Generation | `agents/tree-rubric-generation.md` | `references/contracts.md` | `templates/artifacts/tree-rubrics.json` |
+| Tree Rubric Verification | `agents/tree-rubric-verification.md` | `references/contracts.md` | `templates/artifacts/tree-rubric-verification.json` |
+| Tree Rubric Refinement | `agents/tree-rubric-refinement.md` | `references/contracts.md` | `templates/artifacts/tree-rubrics-refined.json` |
+| Tree Grading | `agents/tree-grading.md` | `references/contracts.md` | `templates/artifacts/tree-grading-individual.json` |
+| QA | `agents/qa.md` | `references/contracts.md` | `templates/artifacts/qa-report.json` |
+| Documentation | `agents/doc.md` | `references/contracts.md` | `templates/artifacts/doc-report.json` |
+| Final Assessment | `agents/final-assessment.md` | `references/contracts.md` | `templates/artifacts/final-assessment.json` |
+| Legacy Review | `agents/review.md` | `references/contracts.md`, `references/pre-rubric.md` | `templates/artifacts/review-individual.json` |
 
 ## Host Notes
 
@@ -180,7 +184,8 @@ For a copy-ready expert primary agent, use
 The Node runtime under `src/runtime/` implements the documented contracts for
 artifact storage, stage catalogs, merge, complexity analysis, validation flow,
 Tree Rubrics, Tree Grading, final assessment, cleanup summaries, and Codex pet
-events. Run tests from the skill package root with:
+events. Optional Git publication uses gitmoji plus Conventional Commits style
+Chinese messages. Run tests from the skill package root with:
 
 ```text
 npm test

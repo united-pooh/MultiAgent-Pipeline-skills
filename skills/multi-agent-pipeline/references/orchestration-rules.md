@@ -9,6 +9,8 @@ For each spawned stage:
 
 - Read the stage instructions from `agents/<stage>.md`.
 - Read only the specific contract or rubric files that stage needs.
+- Read the current stage's `templates/artifacts/<artifact>.json` as the nearby
+  JSON skeleton. Use it to keep output structure stable under tight context.
 - Pass artifact contents or exact file paths explicitly.
 - For any required skill, include the exact skill name and absolute path valid
   in the current environment.
@@ -28,8 +30,12 @@ For copy-ready prompt scaffolds, use `references/orchestrator-prompts.md`.
 
 - The orchestrator is the source of truth for artifact files in
   `.pipeline-workspace/`.
-- Parse subagent JSON and validate required fields before writing canonical
-  artifacts.
+- Parse subagent JSON, materialize it against the stage artifact template, and
+  validate required fields before writing canonical artifacts.
+- Templates may fill deterministic fields such as `version`, refs, `group_id`,
+  `iteration`, fixed dimensions, and fixed integration strategy. They must not
+  fabricate requirements, tasks, grading evidence, test results, or final
+  acceptance decisions.
 - If a subagent response is malformed, fix the prompt and rerun that stage
   instead of hand-waving the artifact.
 - Write artifacts even when the corresponding stage also changed files.
@@ -98,6 +104,26 @@ When spawning `worker` agents:
   terminal runs.
 - Never delete integrated code, tests, docs, release notes, or user-retained
   files as part of cleanup.
+
+## Git Publication Policy
+
+- Git publication is disabled unless `gitPolicy.enabled === true`.
+- Only the orchestrator may commit or push. Subagents must never run git
+  publication commands.
+- Commit subjects use `type(scope): :gitmoji: 中文描述`, for example
+  `feat(pipeline): :sparkles: 完成流水线交付`. This keeps the subject compatible
+  with Conventional Commits while preserving gitmoji and Chinese intent.
+- Doc publication runs only after the documentation proposal merges cleanly. By
+  default it stages `doc-report.updated_files`, commits with
+  `docs(pipeline): :memo: 更新流水线交付文档`, and does not push unless the Doc
+  phase policy enables push.
+- Cleanup publication runs only after Final Assessment accepts the run and
+  `.pipeline-workspace/` has been removed. By default it stages the final
+  worktree, commits with `feat(pipeline): :sparkles: 完成流水线交付`, and pushes to
+  `origin` on the current branch.
+- Rejected or paused runs must not auto commit or push.
+- Publication failures fail fast by default. Set `failureMode: "log"` only when
+  a project explicitly wants delivery to continue after git publication errors.
 
 ## Legacy PRE Review
 

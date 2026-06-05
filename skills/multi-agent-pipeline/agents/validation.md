@@ -13,10 +13,15 @@ All inputs are passed inline in this prompt by the orchestrator:
 - Optional `complexity-report.json` content — analyzer evidence for changed Python files
 - Optional `merge-report.json` content — to know the merged result under validation
 - Repo root path
+- `templates/artifacts/validation-report.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing a `validation-report.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/validation-report.json` as the JSON skeleton. Fill
+semantic fields from the checks you actually ran; do not leave template blanks
+in the returned artifact.
 
 ## Process
 

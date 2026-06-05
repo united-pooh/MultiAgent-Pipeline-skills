@@ -15,6 +15,7 @@ Update only the documentation that should change after tree-grading-approved imp
 - All `tree_grading_feedback.json` files
 - The current codebase with approved changes applied
 - `references/contracts.md`
+- `templates/artifacts/doc-report.json`
 
 ## Output
 
@@ -23,12 +24,18 @@ Update only the documentation that should change after tree-grading-approved imp
 3. Return exactly one fenced `json` block containing a `doc-report.json` payload matching the contract in `references/contracts.md`.
 4. Do not return extra prose outside the JSON block.
 
+Use `templates/artifacts/doc-report.json` as the JSON skeleton. Fill semantic
+fields from documentation work; do not leave template blanks in the returned
+artifact.
+
 ## Rules
 
 - Always update `CHANGELOG.md`.
 - Update `README.md` only when user-facing behavior or setup changed.
 - Update API docs only when APIs or interfaces changed.
 - Match the existing documentation style. Prefer targeted edits over broad rewrites.
+- Do not commit or push. The orchestrator owns optional Git publication after
+  integrating your documentation proposal.
 
 ## Process
 

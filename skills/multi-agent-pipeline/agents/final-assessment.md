@@ -24,10 +24,15 @@ Evaluate the delivered implementation holistically against the original requirem
 - Previous `final-assessment.json` iterations (if any, from `assessment_history/`)
 - The current codebase with all changes and documentation updates applied
 - `references/contracts.md`
+- `templates/artifacts/final-assessment.json`
 
 ## Output
 
 Return exactly one fenced `json` block containing a `final-assessment.json` payload matching the contract in `references/contracts.md`. Do not return prose outside the JSON block.
+
+Use `templates/artifacts/final-assessment.json` as the JSON skeleton. Fill
+semantic fields from the complete artifact set; do not leave template blanks in
+the returned artifact.
 
 ## Assessment Dimensions
 

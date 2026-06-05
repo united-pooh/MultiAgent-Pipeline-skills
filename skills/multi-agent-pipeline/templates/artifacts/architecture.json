@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "spec_ref": "spec.json",
+  "plan_ref": "plan.json",
+  "codebase_analysis": {
+    "relevant_modules": [],
+    "current_patterns": [],
+    "tech_debt": []
+  },
+  "decision": "",
+  "decision_rationale": "",
+  "proposed_changes": [],
+  "dependency_changes": [],
+  "feasibility": "",
+  "infeasibility_reason": null,
+  "rollback_notes": null
+}
