@@ -1,0 +1,15 @@
+{
+  "name": "multi-agent-pipeline-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "multi-agent-pipeline-mcp": "./src/cli.js"
+  },
+  "exports": "./src/index.js",
+  "scripts": {
+    "test": "node --test",
+    "start:stdio": "node ./src/cli.js --transport stdio",
+    "start:http": "node ./src/cli.js --transport http"
+  }
+}

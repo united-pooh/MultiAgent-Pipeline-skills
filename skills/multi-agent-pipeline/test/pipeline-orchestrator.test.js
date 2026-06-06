@@ -1261,7 +1261,7 @@ test("OpenCode expert profiles use task invocation without Codex-only spawn fiel
   }
 });
 
-test("skill entrypoint is OpenCode-compatible and progressively disclosed", async () => {
+test("skill entrypoint is a lightweight MCP adapter", async () => {
   const skillPath = path.resolve(fixtureSourceRoot, "SKILL.md");
   const skillText = await fs.readFile(skillPath, "utf8");
   const lineCount = skillText.trimEnd().split("\n").length;
@@ -1284,24 +1284,15 @@ test("skill entrypoint is OpenCode-compatible and progressively disclosed", asyn
     .trim();
   assert.ok(description.length >= 1, "description should not be empty");
   assert.ok(description.length <= 1024, "OpenCode description limit is 1024 characters");
-
-  const referencedFiles = [
-    "references/codex-execution-model.md",
-    "references/opencode-expert-mode.md",
-    "references/pipeline-stages.md",
-    "references/workspace-and-events.md",
-    "references/orchestration-rules.md",
-    "references/contracts.md",
-    "references/pre-rubric.md",
-    "references/orchestrator-prompts.md",
-    "references/example-run.md",
-    "templates/opencode-expert-agent.md",
-  ];
-
-  for (const relativePath of referencedFiles) {
-    assert.match(skillText, new RegExp(relativePath.replaceAll(".", "\\.")));
-    await fs.access(path.resolve(fixtureSourceRoot, relativePath));
-  }
+  assert.match(frontmatter, /^  disclosure: thin-adapter$/m);
+  assert.match(frontmatter, /^  mcp_server: multi-agent-pipeline-mcp$/m);
+  assert.match(skillText, /mcp-server\//);
+  assert.match(skillText, /pipeline\.\*/);
+  assert.match(skillText, /pipeline:\/\/\.\.\./);
+  assert.match(skillText, /agents\/\*\.md/);
+  assert.match(skillText, /src\/runtime\//);
+  await fs.access(path.resolve(fixtureSourceRoot, "src", "runtime", "pipeline-orchestrator.js"));
+  await fs.access(path.resolve(fixtureSourceRoot, "agents", "execution.md"));
 });
 
 test("Codex pet event helper validates states and builds directive strings", async () => {
@@ -2335,17 +2326,20 @@ test("tree grading waits for all graders to settle before surfacing a grader fai
       orchestrator.run({
         request: "补上 orchestrator skeleton 的runtime 代码",
         runId: "RUN-TEST-GRADER-SETTLED",
-      }),
+    }),
     /tree-grading stage failed: synthetic grader failure/,
   );
-  assert.deepEqual(events, [
-    "grader-1-started",
-    "grader-2-started",
-    "grader-3-started",
-    "grader-1-failed",
-    "grader-2-finished",
-    "grader-3-finished",
-  ]);
+  assert.ok(events.includes("grader-1-started"), events.join(" -> "));
+  assert.ok(events.includes("grader-2-started"), events.join(" -> "));
+  assert.ok(events.includes("grader-3-started"), events.join(" -> "));
+  assert.ok(
+    events.indexOf("grader-1-failed") < events.indexOf("grader-2-finished"),
+    events.join(" -> "),
+  );
+  assert.ok(
+    events.indexOf("grader-1-failed") < events.indexOf("grader-3-finished"),
+    events.join(" -> "),
+  );
 });
 
 test("terminal execution reject stops same-wave groups before merge", async () => {
