@@ -3,6 +3,33 @@
 This file is the detailed phase guide for the active multi-agent production
 pipeline. The main `SKILL.md` keeps only the map and hard gates.
 
+## Global 6-Slot Worker Pool
+
+The orchestrator maintains one global pool of 6 subagent slots for the active
+asynchronous stages:
+
+- Execution
+- Validation
+- Tree Rubrics
+- Tree Grading
+- QA
+
+Every spawned subagent in those stages consumes one slot until it finishes.
+Tree Grading consumes 3 slots by default because the group receives 3
+independent graders. Start Tree Grading only when all 3 slots are free; do not
+spawn a partial grader set or downgrade the grader count unless the user
+explicitly asks for a cheaper pass.
+
+Groups advance independently through the review chain. When a group finishes
+Execution and merges successfully, it may immediately enter Validation if a
+slot is available, even while other groups from the same execution wave are
+still running. The same early-continuation rule applies from Validation to Tree
+Rubrics, from Tree Rubrics to Tree Grading, and from Tree Grading to QA.
+
+Dispatch waves still express dependency readiness and the maximum fanout for
+new Execution groups. They are not barriers for downstream review stages once a
+group has produced a merged proposal.
+
 ## 0. Brainstorming
 
 Brainstorming is orchestrator-local. Do not spawn a subagent.
@@ -86,6 +113,12 @@ Rules:
 
 - Partition tasks into worker groups with explicit file ownership.
 - Arrange groups into dependency-respecting execution waves.
+- Each execution wave contains at most 6 groups.
+- Maximize safe concurrency up to 6 groups per wave.
+- If more than 6 independent components are ready in one dependency layer,
+  merge excess components by affinity, such as module proximity, shared feature
+  area, runtime surface, test surface, or skill routing.
+- Never split overlapping or coupled work merely to fill all 6 slots.
 - Derive `worker_groups[].required_skills` only from
   `architecture.json.proposed_changes[].concerns`.
 - Map `frontend_design` to `ce-frontend-design`.
@@ -94,7 +127,8 @@ Rules:
 
 ## 5. Execution
 
-For each execution wave, spawn one Execution `worker` per ready group.
+For each execution wave, spawn Execution `worker` agents for ready groups while
+respecting the global 6-slot pool.
 
 Rules:
 
@@ -104,6 +138,11 @@ Rules:
 - Return a group-scoped `execution-report.json`.
 - If `required_skills` contains `ce-frontend-design`, attach that skill and
   require `frontend_design_summary`.
+- A same-group retry may add related local goals only inside the existing group
+  ownership or adjacent tests/docs.
+- If retry feedback requires unowned files, cross-group ownership changes, or a
+  different split, the worker must return `status = "blocked"` with a blocker
+  string beginning `REPLAN_REQUIRED:` so the orchestrator can re-dispatch.
 
 ## 5a. Complexity Hook
 
@@ -147,10 +186,13 @@ Rules:
   reports plus repo root.
 - Detect language and run the fix/check layers in `agents/validation.md`.
 - Write `validation-report.json`.
-- Failed or errored validation routes back to Execution.
+- Failed or errored validation routes the group back to Execution as a
+  same-group retry unless the required fix needs re-dispatch.
 - Passed or skipped validation continues to Tree Rubrics.
 - Any fix-layer file edits become part of the current merged main-workspace
   result before Tree Rubrics.
+- A group does not wait for other groups in its execution wave before entering
+  Validation when a pool slot is free.
 
 ## 8. Tree Rubrics
 
@@ -173,6 +215,8 @@ Rules:
 - The rubric must stay tied to the worker group's spec and final output files.
 - Verification checks rubric quality, not implementation quality.
 - Refinement incorporates verification feedback before grading starts.
+- Run this sequence for a group as soon as its Validation stage passes or is
+  skipped and a pool slot is available.
 
 ## 9. Final Output Files And Tree Grading
 
@@ -190,6 +234,8 @@ Rules:
 - A group passes grading when `weighted_score >= 0.80` and all depth-1 rubric
   nodes pass.
 - Failed grading routes the group back to Execution with feedback.
+- Tree Grading consumes 3 slots by default. Wait until 3 pool slots are free,
+  then spawn the grader trio together before waiting on their results.
 
 ## 10. QA
 
@@ -202,6 +248,8 @@ Rules:
 - Write `qa-report.json`.
 - QA is read-only with respect to integrated source changes.
 - A group is cleanup-eligible only after Tree Grading and QA both pass.
+- QA starts for a group as soon as that group passes Tree Grading and a pool
+  slot is available.
 
 ## 11. Documentation
 

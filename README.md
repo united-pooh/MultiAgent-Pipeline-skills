@@ -49,7 +49,8 @@ flowchart LR
 | Codex 子代理 | 使用 `spawn_agent`/`wait_agent` 运行各阶段，默认固定为 `gpt-5.5`、`xhigh` 推理、`priority` service tier |
 | OpenCode 专家模式 | 通过自定义 primary agent 和原生 `skill` tool 进行渐进式披露，Task/subagent 调用细节放在 OpenCode adapter 中 |
 | 显式记录 | 关键产物写入 `.pipeline-workspace/`，成功验收后保留 `.pipeline-last-run-summary.json` |
-| 分组实现 | Dispatch 按文件所有权和依赖拆分 worker group，减少并行冲突 |
+| 分组实现 | Dispatch 按文件所有权和依赖拆分 worker group，每个执行 wave 最多 6 组，并尽量把安全并发打满到 6 |
+| 全局槽位池 | Execution、Validation、Tree Rubrics、Tree Grading、QA 共享 6 个子代理槽位，完成的 group 可在有槽位时提前进入后续阶段 |
 | 保守合并 | Merge 由 orchestrator 本地执行，使用三向合并语义，冲突时暂停给人处理 |
 | 多语言验证 | Validation 根据项目标记自动选择 Go、Python、JavaScript/TypeScript、Rust、Java、Ruby 的 fix/check 命令 |
 | 产物模板 | 每个 stage 有 `templates/artifacts/` JSON 骨架，runtime 会先填确定字段再交给 contract validator |
@@ -57,6 +58,14 @@ flowchart LR
 | Tree Rubrics 评分 | 每个 group 生成分类、初版 rubric、验证结果和 refined rubric，再对最终输出文件评分 |
 | 端到端评分 | Tree Grading 只看 `spec`、`tree_rubrics_refined.json` 和 `final-output-files.json`，不看过程日志或 agent 行为 |
 | Codex pet 事件 | Runtime 会输出 `codex_pet_events`，把 pipeline 阶段映射到 `running`、`review`、`failed`、`waiting`、`waving` 等 Codex avatar state |
+
+## 并发与早续流转
+
+Dispatch 的每个执行 wave 最多包含 6 个 worker group。它会优先保留安全拆分，尽量把并发扩展到 6；如果同一依赖层里有超过 6 个互不冲突的独立组件，会按模块亲缘、功能区域、运行时表面、测试表面或所需 skill 把多出来的组件合并到相近 group。它不会为了凑满 6 个槽位而把有文件重叠或强耦合的任务硬拆开。
+
+Execution、Validation、Tree Rubrics、Tree Grading 和 QA 共享一个全局 6 槽子代理池。一个 group 完成 Execution 并成功合并后，只要有槽位就可以立即进入 Validation；Validation 通过后也可以继续进入 Tree Rubrics、Tree Grading 和 QA，不需要等待同一 execution wave 里的其他 group 全部完成。Tree Grading 默认一次占用 3 个槽位来启动 3 个独立 grader，必须等 3 个槽位都空出来后再一起启动。
+
+重试保持同组优先：Validation、Tree Grading 或 QA 发现的问题如果能在原 group 的 owned files 或相邻测试/文档内修复，就回到 Execution 做同组 retry。若修复需要未授权文件、跨 group 所有权变化或重新拆分任务，Execution 必须以 `REPLAN_REQUIRED:` blocker 返回，让 orchestrator 回到 Dispatch 重新分派。
 
 ## 文件结构
 

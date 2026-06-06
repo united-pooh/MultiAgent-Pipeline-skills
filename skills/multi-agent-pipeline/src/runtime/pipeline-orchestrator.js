@@ -28,6 +28,83 @@ import { loadStageCatalog } from "./stage-catalog.js";
 import { aggregateTreeGradingFeedback } from "./tree-grading.js";
 import { nowIso, sanitizeForPath, uniqueStrings } from "./utils.js";
 
+const DEFAULT_MAX_CONCURRENT_SUBAGENTS = 6;
+const REPLAN_REQUIRED_PREFIX = "REPLAN_REQUIRED:";
+
+class AsyncSlotPool {
+  constructor(maxSlots) {
+    if (!Number.isInteger(maxSlots) || maxSlots < 1) {
+      throw new Error("AsyncSlotPool requires maxSlots to be a positive integer");
+    }
+
+    this.maxSlots = maxSlots;
+    this.availableSlots = maxSlots;
+    this.queue = [];
+  }
+
+  async run(slotCount, task) {
+    const release = await this.acquire(slotCount);
+    try {
+      return await task();
+    } finally {
+      release();
+    }
+  }
+
+  acquire(slotCount) {
+    if (!Number.isInteger(slotCount) || slotCount < 0) {
+      throw new Error("slotCount must be a non-negative integer");
+    }
+
+    if (slotCount === 0) {
+      return Promise.resolve(() => {});
+    }
+
+    if (slotCount > this.maxSlots) {
+      throw new Error(`Cannot acquire ${slotCount} slot(s) from a ${this.maxSlots}-slot pool`);
+    }
+
+    return new Promise((resolve) => {
+      this.queue.push({ slotCount, resolve });
+      this.drain();
+    });
+  }
+
+  drain() {
+    while (this.queue.length > 0) {
+      const entry = this.queue[0];
+      if (entry.slotCount > this.availableSlots) {
+        return;
+      }
+
+      this.queue.shift();
+      this.availableSlots -= entry.slotCount;
+      let released = false;
+      entry.resolve(() => {
+        if (released) {
+          return;
+        }
+
+        released = true;
+        this.availableSlots += entry.slotCount;
+        this.drain();
+      });
+    }
+  }
+}
+
+function recordWaveStop(stopSignal, error) {
+  if (stopSignal && !stopSignal.error) {
+    stopSignal.error = error;
+  }
+}
+
+function throwIfWaveStopped(stopSignal) {
+  if (stopSignal?.error) {
+    throw stopSignal.error;
+  }
+}
+
 function artifactTypeForStage(stage) {
   switch (stage) {
     case "spec":
@@ -147,6 +224,10 @@ function hasQaPass(state) {
   return state.qaResult?.artifact?.status === "pass";
 }
 
+function hasQaFailure(state) {
+  return state.qaResult?.artifact?.status === "fail";
+}
+
 function latestFailedTreeGradingFeedback(state) {
   const latestFeedback = latestTreeGradingEntry(state)?.artifact ?? null;
   return latestFeedback?.verdict === "fail" ? latestFeedback : null;
@@ -155,6 +236,29 @@ function latestFailedTreeGradingFeedback(state) {
 function latestFailedValidationReport(state) {
   const latestValidation = latestValidationEntry(state)?.artifact ?? null;
   return ["failed", "error"].includes(latestValidation?.status) ? latestValidation : null;
+}
+
+function latestFailedQaReport(state) {
+  const latestQa = state.qaResult?.artifact ?? null;
+  return latestQa?.status === "fail" ? latestQa : null;
+}
+
+function executionBlockerRequiresReplan(executionArtifact) {
+  const firstBlocker = executionArtifact.blockers?.[0] ?? "";
+  return firstBlocker.trimStart().startsWith(REPLAN_REQUIRED_PREFIX);
+}
+
+function buildIterationPolicy(workerGroup) {
+  return {
+    goal_expansion: "related_same_group",
+    allowed_files: workerGroup.owned_files ?? [],
+    replan_blocker_prefix: REPLAN_REQUIRED_PREFIX,
+    replan_required_when: [
+      "the retry needs files outside worker_group.owned_files",
+      "the retry changes cross-group dependencies",
+      "the retry changes task ownership or dispatch grouping",
+    ],
+  };
 }
 
 function nextExecutionIteration(state) {
@@ -392,6 +496,7 @@ export class PipelineOrchestrator {
     complexityHook = runComplexityHook,
     gitPolicy = null,
     gitAutomation = null,
+    maxConcurrentSubagents = DEFAULT_MAX_CONCURRENT_SUBAGENTS,
   }) {
     if (!repoRoot) {
       throw new Error("PipelineOrchestrator requires repoRoot");
@@ -401,10 +506,23 @@ export class PipelineOrchestrator {
       throw new Error("PipelineOrchestrator requires a stageRunner with runStage(request)");
     }
 
+    if (!Number.isInteger(graderCount) || graderCount < 1) {
+      throw new Error("graderCount must be a positive integer");
+    }
+
+    if (!Number.isInteger(maxConcurrentSubagents) || maxConcurrentSubagents < 1) {
+      throw new Error("maxConcurrentSubagents must be a positive integer");
+    }
+
+    if (graderCount > maxConcurrentSubagents) {
+      throw new Error("maxConcurrentSubagents must be greater than or equal to graderCount");
+    }
+
     this.repoRoot = repoRoot;
     this.stageRunner = stageRunner;
     this.reviewMode = reviewMode;
     this.graderCount = graderCount;
+    this.maxConcurrentSubagents = maxConcurrentSubagents;
     this.gradingThreshold = gradingThreshold;
     this.requireDepthOnePass = requireDepthOnePass;
     this.maxStageRetries = maxStageRetries;
@@ -417,6 +535,8 @@ export class PipelineOrchestrator {
     this.gitAutomation = gitAutomation ?? (
       this.gitPublicationPolicy.enabled ? new GitAutomation({ repoRoot }) : null
     );
+    this.subagentSlots = new AsyncSlotPool(maxConcurrentSubagents);
+    this.mergeSlots = new AsyncSlotPool(1);
     this.codexPetEvents = [];
   }
 
@@ -634,75 +754,13 @@ export class PipelineOrchestrator {
         return state;
       });
 
-      while (waveStates.some((state) => !hasTreeGradingPass(state))) {
-        const executionRuns = await Promise.all(
-          waveStates
-            .filter((state) => !hasTreeGradingPass(state))
-            .map((state) =>
-              this.runExecutionPass({
-                spec,
-                plan,
-                architecture,
-                groupState: state,
-                wave,
-              }),
-            ),
-        );
-        const executionByGroup = new Map(
-          executionRuns.map((executionRun) => [
-            executionRun.groupState.workerGroup.group_id,
-            executionRun,
-          ]),
-        );
-
-        for (const groupId of wave.groups) {
-          const executionRun = executionByGroup.get(groupId);
-          if (!executionRun) {
-            continue;
-          }
-
-          await this.integrateAndGradeExecutionPass({
-            spec,
-            architecture,
-            groupState: executionRun.groupState,
-            executionRun,
-          });
-        }
-      }
-
-      const qaStates = waveStates.filter((state) => !hasQaPass(state));
-      if (qaStates.length > 0) {
-        const qaRuns = await Promise.allSettled(
-          qaStates.map((state) =>
-            this.runQaStage({
-              spec,
-              architecture,
-              workerGroup: state.workerGroup,
-              executionResult: state.finalExecution,
-              validationResult: state.finalValidation,
-              mergeResult: state.finalMerge,
-              treeGradingFeedback: state.finalTreeGradingFeedback,
-              complexityResult: state.finalComplexity,
-            }),
-          ),
-        );
-
-        let firstQaError = null;
-        qaRuns.forEach((qaRun, index) => {
-          if (qaRun.status === "fulfilled") {
-            qaStates[index].qaResult = qaRun.value;
-            return;
-          }
-
-          if (!firstQaError) {
-            firstQaError = qaRun.reason;
-          }
-        });
-
-        if (firstQaError) {
-          throw firstQaError;
-        }
-      }
+      await this.runWaveWorkerPool({
+        spec,
+        plan,
+        architecture,
+        wave,
+        waveStates,
+      });
     }
 
     const docReport = await this.runDocStage({
@@ -752,6 +810,68 @@ export class PipelineOrchestrator {
       docReport,
       finalAssessment,
     };
+  }
+
+  async runWaveWorkerPool({ spec, plan, architecture, wave, waveStates }) {
+    const stopSignal = { error: null };
+    const groupRuns = await Promise.allSettled(
+      waveStates.map((groupState) =>
+        this.runGroupUntilQaPass({
+          spec,
+          plan,
+          architecture,
+          wave,
+          groupState,
+          stopSignal,
+        }).catch((error) => {
+          recordWaveStop(stopSignal, error);
+          throw error;
+        }),
+      ),
+    );
+    const firstError =
+      stopSignal.error ?? groupRuns.find((result) => result.status === "rejected")?.reason;
+
+    if (firstError) {
+      throw firstError;
+    }
+  }
+
+  async runGroupUntilQaPass({ spec, plan, architecture, wave, groupState, stopSignal = null }) {
+    while (!hasQaPass(groupState)) {
+      throwIfWaveStopped(stopSignal);
+      if (!hasTreeGradingPass(groupState) || hasQaFailure(groupState)) {
+        const executionRun = await this.runExecutionPass({
+          spec,
+          plan,
+          architecture,
+          groupState,
+          wave,
+          stopSignal,
+        });
+        throwIfWaveStopped(stopSignal);
+        await this.integrateAndGradeExecutionPass({
+          spec,
+          architecture,
+          groupState,
+          executionRun,
+          stopSignal,
+        });
+        continue;
+      }
+
+      throwIfWaveStopped(stopSignal);
+      groupState.qaResult = await this.runQaStage({
+        spec,
+        architecture,
+        workerGroup: groupState.workerGroup,
+        executionResult: groupState.finalExecution,
+        validationResult: groupState.finalValidation,
+        mergeResult: groupState.finalMerge,
+        treeGradingFeedback: groupState.finalTreeGradingFeedback,
+        complexityResult: groupState.finalComplexity,
+      });
+    }
   }
 
   async finishRun({ runId, spec, plan, dispatch, groupStates, finalAssessment }) {
@@ -907,6 +1027,12 @@ export class PipelineOrchestrator {
     return result.artifact;
   }
 
+  async runSubagentStage(stage, context, validationContext = {}, { slotCost = 1 } = {}) {
+    return this.subagentSlots.run(slotCost, () =>
+      this.runStage(stage, context, validationContext),
+    );
+  }
+
   async runStage(stage, context, validationContext = {}) {
     const artifactType = artifactTypeForStage(stage);
     let lastError = null;
@@ -1000,14 +1126,16 @@ export class PipelineOrchestrator {
     });
   }
 
-  async runExecutionPass({ spec, plan, architecture, groupState, wave }) {
+  async runExecutionPass({ spec, plan, architecture, groupState, wave, stopSignal = null }) {
+    throwIfWaveStopped(stopSignal);
     const iteration = nextExecutionIteration(groupState);
     const baseRef = await this.createBaseRef({
       wave: wave.wave,
       groupId: groupState.workerGroup.group_id,
       iteration,
     });
-    const executionResult = await this.runStage(
+    throwIfWaveStopped(stopSignal);
+    const executionResult = await this.runSubagentStage(
       "execution",
       {
         spec,
@@ -1018,16 +1146,22 @@ export class PipelineOrchestrator {
         iteration,
         treeGradingFeedback: latestFailedTreeGradingFeedback(groupState),
         validationReport: latestFailedValidationReport(groupState),
+        qaReport: latestFailedQaReport(groupState),
+        iterationPolicy: buildIterationPolicy(groupState.workerGroup),
       },
       {
         requiredSkills: groupState.workerGroup.required_skills,
       },
     );
+    throwIfWaveStopped(stopSignal);
 
     if (executionResult.artifact.status === "blocked") {
+      const restartFrom = executionBlockerRequiresReplan(executionResult.artifact)
+        ? "dispatch"
+        : "execution";
       throw new PipelineRejectedError(
         `Execution blocked for ${groupState.workerGroup.group_id}: ${executionResult.artifact.blockers.join("; ")}`,
-        { restartFrom: "execution" },
+        { restartFrom },
       );
     }
 
@@ -1056,6 +1190,7 @@ export class PipelineOrchestrator {
     groupState.finalExecution = persistedExecution;
     groupState.complexityHistory.push(complexityResult);
     groupState.finalComplexity = complexityResult;
+    groupState.qaResult = null;
 
     return {
       groupState,
@@ -1090,19 +1225,33 @@ export class PipelineOrchestrator {
     };
   }
 
-  async integrateAndGradeExecutionPass({ spec, architecture, groupState, executionRun }) {
-    const mergeOutcome = await this.mergeEngine.mergeProposal({
-      groupId: groupState.workerGroup.group_id,
-      iteration: executionRun.iteration,
-      baseRef: executionRun.baseRef,
-      proposal: executionRun.executionResult.stageExecution.proposal,
-      changedFiles: executionRun.executionResult.artifact.changed_files,
+  async integrateAndGradeExecutionPass({
+    spec,
+    architecture,
+    groupState,
+    executionRun,
+    stopSignal = null,
+  }) {
+    throwIfWaveStopped(stopSignal);
+    const { mergeOutcome, mergeRef } = await this.mergeSlots.run(1, async () => {
+      throwIfWaveStopped(stopSignal);
+      const outcome = await this.mergeEngine.mergeProposal({
+        groupId: groupState.workerGroup.group_id,
+        iteration: executionRun.iteration,
+        baseRef: executionRun.baseRef,
+        proposal: executionRun.executionResult.stageExecution.proposal,
+        changedFiles: executionRun.executionResult.artifact.changed_files,
+      });
+      const ref = await this.artifactStore.writeMergeReport(
+        groupState.workerGroup.group_id,
+        executionRun.iteration,
+        outcome.report,
+      );
+      return {
+        mergeOutcome: outcome,
+        mergeRef: ref,
+      };
     });
-    const mergeRef = await this.artifactStore.writeMergeReport(
-      groupState.workerGroup.group_id,
-      executionRun.iteration,
-      mergeOutcome.report,
-    );
     const mergeEntry = {
       artifact: mergeOutcome.report,
       ref: mergeRef,
@@ -1121,6 +1270,7 @@ export class PipelineOrchestrator {
       );
     }
 
+    throwIfWaveStopped(stopSignal);
     const validationResult = await this.runValidationStage({
       workerGroup: groupState.workerGroup,
       executionResult: executionRun.executionResult,
@@ -1147,6 +1297,7 @@ export class PipelineOrchestrator {
       return;
     }
 
+    throwIfWaveStopped(stopSignal);
     const gradingResult = await this.runTreeRubricsAndGradingStage({
       spec,
       architecture,
@@ -1382,7 +1533,7 @@ export class PipelineOrchestrator {
   }
 
   async runTreeRubricsAndGradingStage({ spec, architecture, workerGroup, executionResult, iteration }) {
-    const classification = await this.runStage(
+    const classification = await this.runSubagentStage(
       "tree-classification",
       {
         spec,
@@ -1398,7 +1549,7 @@ export class PipelineOrchestrator {
       classification.artifact,
     );
 
-    const treeRubrics = await this.runStage(
+    const treeRubrics = await this.runSubagentStage(
       "tree-rubric-generation",
       {
         spec,
@@ -1415,7 +1566,7 @@ export class PipelineOrchestrator {
       treeRubrics.artifact,
     );
 
-    const verification = await this.runStage(
+    const verification = await this.runSubagentStage(
       "tree-rubric-verification",
       {
         spec,
@@ -1432,7 +1583,7 @@ export class PipelineOrchestrator {
       verification.artifact,
     );
 
-    const refinedRubrics = await this.runStage(
+    const refinedRubrics = await this.runSubagentStage(
       "tree-rubric-refinement",
       {
         spec,
@@ -1456,25 +1607,33 @@ export class PipelineOrchestrator {
       iteration,
     });
 
-    const graderRuns = await Promise.all(
-      Array.from({ length: this.graderCount }, (_, index) =>
-        this.runStage(
-          "tree-grading",
-          {
-            spec,
-            workerGroup,
-            treeRubrics: refinedRubrics.artifact,
-            finalOutputFiles: finalOutputFiles.artifact,
-            graderId: index + 1,
-            iteration,
-          },
-          {
-            rubric: refinedRubrics.artifact,
-            finalOutputFiles: finalOutputFiles.artifact,
-          },
+    const graderRuns = await this.subagentSlots.run(this.graderCount, async () => {
+      const settledGraderRuns = await Promise.allSettled(
+        Array.from({ length: this.graderCount }, (_, index) =>
+          this.runStage(
+            "tree-grading",
+            {
+              spec,
+              workerGroup,
+              treeRubrics: refinedRubrics.artifact,
+              finalOutputFiles: finalOutputFiles.artifact,
+              graderId: index + 1,
+              iteration,
+            },
+            {
+              rubric: refinedRubrics.artifact,
+              finalOutputFiles: finalOutputFiles.artifact,
+            },
+          ),
         ),
-      ),
-    );
+      );
+      const rejectedRun = settledGraderRuns.find((result) => result.status === "rejected");
+      if (rejectedRun) {
+        throw rejectedRun.reason;
+      }
+
+      return settledGraderRuns.map((result) => result.value);
+    });
 
     const graderArtifacts = [];
     for (const graderRun of graderRuns) {
@@ -1525,7 +1684,7 @@ export class PipelineOrchestrator {
     iteration,
     conflictResolution = null,
   }) {
-    const validationResult = await this.runStage(
+    const validationResult = await this.runSubagentStage(
       "validation",
       {
         workerGroup,
@@ -1562,7 +1721,7 @@ export class PipelineOrchestrator {
     treeGradingFeedback,
     complexityResult = null,
   }) {
-    const qaResult = await this.runStage("qa", {
+    const qaResult = await this.runSubagentStage("qa", {
       spec,
       architecture,
       workerGroup,
@@ -1578,13 +1737,6 @@ export class PipelineOrchestrator {
       executionResult.artifact.iteration,
       qaResult.artifact,
     );
-
-    if (qaResult.artifact.status === "fail") {
-      throw new PipelineRejectedError(
-        `QA failed for ${workerGroup.group_id}: ${qaResult.artifact.blocking_issues.join("; ")}`,
-        { restartFrom: "execution" },
-      );
-    }
 
     return {
       ...qaResult,

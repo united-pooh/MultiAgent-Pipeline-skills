@@ -384,24 +384,29 @@ function makeTreeStageResponses({
   };
 }
 
-function makeQaArtifact(groupId, iteration) {
+function makeQaArtifact(groupId, iteration, overrides = {}) {
+  const status = overrides.status ?? "pass";
   return {
     version: "1.0",
     group_id: groupId,
     iteration,
-    status: "pass",
+    status,
     test_infrastructure: "configured",
-    test_results: [
+    test_results: overrides.test_results ?? [
       {
         kind: "scenario",
         requirement_ids: ["REQ-001"],
         command: "manual scenario",
-        status: "passed",
-        details: "Pipeline runtime behavior validated via mocked run.",
+        status: status === "pass" ? "passed" : "failed",
+        details: status === "pass"
+          ? "Pipeline runtime behavior validated via mocked run."
+          : "Scenario exposed a retryable QA issue.",
       },
     ],
-    blocking_issues: [],
-    notes: [],
+    blocking_issues: overrides.blocking_issues ?? (
+      status === "pass" ? [] : ["Scenario failed and needs same-group rework."]
+    ),
+    notes: overrides.notes ?? [],
   };
 }
 
@@ -904,6 +909,38 @@ test("dispatch validation enforces architecture-derived required skills", async 
     () => validateArtifact("dispatch", dispatch, { plan, architecture }),
     /required_skills must match architecture-derived routing/,
   );
+});
+
+test("execution report requires REPLAN_REQUIRED as the first blocker when present", () => {
+  const report = {
+    ...makeExecutionArtifact({
+      groupId: "GROUP-1",
+      iteration: 1,
+      baseRef: "bases/wave-1-group-1-base.json",
+      changedFiles: [],
+      proposalRef: "worker://GROUP-1/iteration-1",
+    }),
+    status: "blocked",
+    blockers: [
+      "Same-group retry cannot continue.",
+      "REPLAN_REQUIRED: retry needs files outside worker_group.owned_files",
+    ],
+  };
+
+  assert.throws(
+    () => validateArtifact("execution-report", report, { requiredSkills: [] }),
+    /REPLAN_REQUIRED must be the first blocker/,
+  );
+});
+
+test("pipeline orchestrator defaults to a six-slot subagent pool", async () => {
+  const repoRoot = await createRepoFixture();
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: new ScriptedStageRunner({}),
+  });
+
+  assert.equal(orchestrator.maxConcurrentSubagents, 6);
 });
 
 test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => {
@@ -1662,7 +1699,7 @@ test("same-wave groups keep execution and QA parallelizable while merge integrat
       qaTracker.active += 1;
       qaTracker.maxActive = Math.max(qaTracker.maxActive, qaTracker.active);
       try {
-        await sleep(20);
+        await sleep(150);
         return { rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1)) };
       } finally {
         qaTracker.active -= 1;
@@ -1672,7 +1709,7 @@ test("same-wave groups keep execution and QA parallelizable while merge integrat
       qaTracker.active += 1;
       qaTracker.maxActive = Math.max(qaTracker.maxActive, qaTracker.active);
       try {
-        await sleep(20);
+        await sleep(150);
         return { rawOutput: jsonBlock(makeQaArtifact("GROUP-2", 1)) };
       } finally {
         qaTracker.active -= 1;
@@ -1703,6 +1740,911 @@ test("same-wave groups keep execution and QA parallelizable while merge integrat
   assert.equal(qaTracker.maxActive, 2);
   assert.equal(await fs.readFile(path.join(repoRoot, "src", "group-a.txt"), "utf8"), "updated-a\n");
   assert.equal(await fs.readFile(path.join(repoRoot, "src", "group-b.txt"), "utf8"), "updated-b\n");
+});
+
+test("completed same-wave groups advance to review and QA before slower executions finish", async () => {
+  const repoRoot = await createRepoFixture();
+  const events = [];
+  const proposalADir = await createProposalDir({
+    "src/group-a.txt": "fast-a\n",
+  });
+  const proposalBDir = await createProposalDir({
+    "src/group-b.txt": "slow-b\n",
+  });
+  const workerGroups = [
+    {
+      group_id: "GROUP-1",
+      tasks: ["TASK-001"],
+      owned_files: ["src/group-a.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+    {
+      group_id: "GROUP-2",
+      tasks: ["TASK-002"],
+      owned_files: ["src/group-b.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+  ];
+
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: {
+      rawOutput: jsonBlock(
+        makePlanArtifact(["TASK-001", "TASK-002"], ["src/group-a.txt", "src/group-b.txt"]),
+      ),
+    },
+    architecture: {
+      rawOutput: jsonBlock(
+        makeArchitectureArtifact([
+          {
+            target: "src/group-a.txt",
+            change_type: "modify",
+            description: "Update group A file.",
+            concerns: [],
+          },
+          {
+            target: "src/group-b.txt",
+            change_type: "modify",
+            description: "Update group B file.",
+            concerns: [],
+          },
+        ]),
+      ),
+    },
+    dispatch: {
+      rawOutput: jsonBlock(makeDispatchArtifact(workerGroups)),
+    },
+    "execution:GROUP-1:iteration-1": (request) => {
+      events.push("group-1-execution-finished");
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-1",
+            iteration: 1,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-a.txt"],
+            proposalRef: "worker://GROUP-1/iteration-1",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-1/iteration-1",
+          path: proposalADir,
+        },
+      };
+    },
+    "execution:GROUP-2:iteration-1": async (request) => {
+      events.push("group-2-execution-started");
+      await sleep(150);
+      events.push("group-2-execution-finished");
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-2",
+            iteration: 1,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-b.txt"],
+            proposalRef: "worker://GROUP-2/iteration-1",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-2/iteration-1",
+          path: proposalBDir,
+        },
+      };
+    },
+    "validation:GROUP-1:iteration-1": () => {
+      events.push("group-1-validation-started");
+      return { rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)) };
+    },
+    "validation:GROUP-2:iteration-1": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-2", 1)),
+    },
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 1, outputFile: "src/group-a.txt" }),
+    ...makeTreeStageResponses({ groupId: "GROUP-2", iteration: 1, outputFile: "src/group-b.txt" }),
+    "tree-rubric-generation:GROUP-1:iteration-1": () => {
+      events.push("group-1-tree-rubrics-started");
+      return { rawOutput: jsonBlock(makeTreeRubrics("GROUP-1", "src/group-a.txt")) };
+    },
+    "tree-grading:GROUP-1:iteration-1:grader-1": (request) => {
+      const rubric = makeTreeRubrics("GROUP-1", "src/group-a.txt");
+      events.push("group-1-tree-grading-started");
+      assert.equal(request.context.finalOutputFiles.files[0].path, "src/group-a.txt");
+      return {
+        rawOutput: jsonBlock(
+          makeTreeGradingArtifact({
+            graderId: 1,
+            groupId: "GROUP-1",
+            iteration: 1,
+            rubric,
+            evidenceFile: "src/group-a.txt",
+          }),
+        ),
+      };
+    },
+    "qa:GROUP-1:iteration-1": () => {
+      events.push("group-1-qa-started");
+      return { rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1)) };
+    },
+    "qa:GROUP-2:iteration-1": {
+      rawOutput: jsonBlock(makeQaArtifact("GROUP-2", 1)),
+    },
+    doc: { rawOutput: jsonBlock(makeDocArtifact()) },
+    "final-assessment": { rawOutput: jsonBlock(makeFinalAssessmentArtifact()) },
+  };
+
+  const runner = new ScriptedStageRunner(responses);
+  const store = new ArtifactStore({ repoRoot });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    mergeEngine: new SerialAssertingMergeEngine({ repoRoot, artifactStore: store }),
+  });
+
+  const result = await orchestrator.run({
+    request: "补上 orchestrator skeleton 的runtime 代码",
+    runId: "RUN-TEST-EARLY-REVIEW",
+  });
+
+  assert.equal(result.verdict, "accept");
+  assert.ok(
+    events.indexOf("group-1-validation-started") < events.indexOf("group-2-execution-finished"),
+    events.join(" -> "),
+  );
+  assert.ok(
+    events.indexOf("group-1-tree-rubrics-started") < events.indexOf("group-2-execution-finished"),
+    events.join(" -> "),
+  );
+  assert.ok(
+    events.indexOf("group-1-tree-grading-started") < events.indexOf("group-2-execution-finished"),
+    events.join(" -> "),
+  );
+  assert.ok(
+    events.indexOf("group-1-qa-started") < events.indexOf("group-2-execution-finished"),
+    events.join(" -> "),
+  );
+});
+
+test("failed tree grading immediately schedules retry before slower same-wave executions finish", async () => {
+  const repoRoot = await createRepoFixture();
+  const events = [];
+  const proposalAOneDir = await createProposalDir({
+    "src/group-a.txt": "needs retry\n",
+  });
+  const proposalATwoDir = await createProposalDir({
+    "src/group-a.txt": "retry fixed\n",
+  });
+  const proposalBDir = await createProposalDir({
+    "src/group-b.txt": "slow-b\n",
+  });
+  const workerGroups = [
+    {
+      group_id: "GROUP-1",
+      tasks: ["TASK-001"],
+      owned_files: ["src/group-a.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+    {
+      group_id: "GROUP-2",
+      tasks: ["TASK-002"],
+      owned_files: ["src/group-b.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+  ];
+
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: {
+      rawOutput: jsonBlock(
+        makePlanArtifact(["TASK-001", "TASK-002"], ["src/group-a.txt", "src/group-b.txt"]),
+      ),
+    },
+    architecture: {
+      rawOutput: jsonBlock(
+        makeArchitectureArtifact([
+          {
+            target: "src/group-a.txt",
+            change_type: "modify",
+            description: "Update group A file.",
+            concerns: [],
+          },
+          {
+            target: "src/group-b.txt",
+            change_type: "modify",
+            description: "Update group B file.",
+            concerns: [],
+          },
+        ]),
+      ),
+    },
+    dispatch: {
+      rawOutput: jsonBlock(makeDispatchArtifact(workerGroups)),
+    },
+    "execution:GROUP-1:iteration-1": (request) => ({
+      rawOutput: jsonBlock(
+        makeExecutionArtifact({
+          groupId: "GROUP-1",
+          iteration: 1,
+          baseRef: request.context.baseRef,
+          changedFiles: ["src/group-a.txt"],
+          proposalRef: "worker://GROUP-1/iteration-1",
+        }),
+      ),
+      proposal: {
+        ref: "worker://GROUP-1/iteration-1",
+        path: proposalAOneDir,
+      },
+    }),
+    "execution:GROUP-1:iteration-2": (request) => {
+      events.push("group-1-iteration-2-started");
+      assert.equal(request.context.treeGradingFeedback.verdict, "fail");
+      assert.equal(request.context.iterationPolicy.replan_blocker_prefix, "REPLAN_REQUIRED:");
+      assert.deepEqual(request.context.iterationPolicy.allowed_files, ["src/group-a.txt"]);
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-1",
+            iteration: 2,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-a.txt"],
+            proposalRef: "worker://GROUP-1/iteration-2",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-1/iteration-2",
+          path: proposalATwoDir,
+        },
+      };
+    },
+    "execution:GROUP-2:iteration-1": async (request) => {
+      events.push("group-2-execution-started");
+      await sleep(175);
+      events.push("group-2-execution-finished");
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-2",
+            iteration: 1,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-b.txt"],
+            proposalRef: "worker://GROUP-2/iteration-1",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-2/iteration-1",
+          path: proposalBDir,
+        },
+      };
+    },
+    "validation:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
+    },
+    "validation:GROUP-1:iteration-2": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 2)),
+    },
+    "validation:GROUP-2:iteration-1": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-2", 1)),
+    },
+    ...makeTreeStageResponses({
+      groupId: "GROUP-1",
+      iteration: 1,
+      outputFile: "src/group-a.txt",
+      failingNodeIds: ["B1-D1-01"],
+    }),
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 2, outputFile: "src/group-a.txt" }),
+    ...makeTreeStageResponses({ groupId: "GROUP-2", iteration: 1, outputFile: "src/group-b.txt" }),
+    "qa:GROUP-1:iteration-2": {
+      rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 2)),
+    },
+    "qa:GROUP-2:iteration-1": {
+      rawOutput: jsonBlock(makeQaArtifact("GROUP-2", 1)),
+    },
+    doc: { rawOutput: jsonBlock(makeDocArtifact()) },
+    "final-assessment": { rawOutput: jsonBlock(makeFinalAssessmentArtifact()) },
+  };
+
+  const runner = new ScriptedStageRunner(responses);
+  const store = new ArtifactStore({ repoRoot });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    mergeEngine: new SerialAssertingMergeEngine({ repoRoot, artifactStore: store }),
+  });
+
+  const result = await orchestrator.run({
+    request: "补上 orchestrator skeleton 的runtime 代码",
+    runId: "RUN-TEST-EARLY-RETRY",
+  });
+
+  assert.equal(result.verdict, "accept");
+  assert.ok(
+    events.indexOf("group-1-iteration-2-started") < events.indexOf("group-2-execution-finished"),
+    events.join(" -> "),
+  );
+  assert.equal(await fs.readFile(path.join(repoRoot, "src", "group-a.txt"), "utf8"), "retry fixed\n");
+});
+
+test("failed QA schedules same-group retry with QA feedback before slower executions finish", async () => {
+  const repoRoot = await createRepoFixture();
+  const events = [];
+  const proposalAOneDir = await createProposalDir({
+    "src/group-a.txt": "qa issue\n",
+  });
+  const proposalATwoDir = await createProposalDir({
+    "src/group-a.txt": "qa fixed\n",
+  });
+  const proposalBDir = await createProposalDir({
+    "src/group-b.txt": "slow-b\n",
+  });
+  const workerGroups = [
+    {
+      group_id: "GROUP-1",
+      tasks: ["TASK-001"],
+      owned_files: ["src/group-a.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+    {
+      group_id: "GROUP-2",
+      tasks: ["TASK-002"],
+      owned_files: ["src/group-b.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+  ];
+
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: {
+      rawOutput: jsonBlock(
+        makePlanArtifact(["TASK-001", "TASK-002"], ["src/group-a.txt", "src/group-b.txt"]),
+      ),
+    },
+    architecture: {
+      rawOutput: jsonBlock(
+        makeArchitectureArtifact([
+          {
+            target: "src/group-a.txt",
+            change_type: "modify",
+            description: "Update group A file.",
+            concerns: [],
+          },
+          {
+            target: "src/group-b.txt",
+            change_type: "modify",
+            description: "Update group B file.",
+            concerns: [],
+          },
+        ]),
+      ),
+    },
+    dispatch: {
+      rawOutput: jsonBlock(makeDispatchArtifact(workerGroups)),
+    },
+    "execution:GROUP-1:iteration-1": (request) => ({
+      rawOutput: jsonBlock(
+        makeExecutionArtifact({
+          groupId: "GROUP-1",
+          iteration: 1,
+          baseRef: request.context.baseRef,
+          changedFiles: ["src/group-a.txt"],
+          proposalRef: "worker://GROUP-1/iteration-1",
+        }),
+      ),
+      proposal: {
+        ref: "worker://GROUP-1/iteration-1",
+        path: proposalAOneDir,
+      },
+    }),
+    "execution:GROUP-1:iteration-2": (request) => {
+      events.push("group-1-iteration-2-started");
+      assert.equal(request.context.qaReport.status, "fail");
+      assert.equal(request.context.qaReport.blocking_issues[0], "Scenario failed and needs same-group rework.");
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-1",
+            iteration: 2,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-a.txt"],
+            proposalRef: "worker://GROUP-1/iteration-2",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-1/iteration-2",
+          path: proposalATwoDir,
+        },
+      };
+    },
+    "execution:GROUP-2:iteration-1": async (request) => {
+      events.push("group-2-execution-started");
+      await sleep(175);
+      events.push("group-2-execution-finished");
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-2",
+            iteration: 1,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-b.txt"],
+            proposalRef: "worker://GROUP-2/iteration-1",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-2/iteration-1",
+          path: proposalBDir,
+        },
+      };
+    },
+    "validation:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
+    },
+    "validation:GROUP-1:iteration-2": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 2)),
+    },
+    "validation:GROUP-2:iteration-1": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-2", 1)),
+    },
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 1, outputFile: "src/group-a.txt" }),
+    ...makeTreeStageResponses({ groupId: "GROUP-1", iteration: 2, outputFile: "src/group-a.txt" }),
+    ...makeTreeStageResponses({ groupId: "GROUP-2", iteration: 1, outputFile: "src/group-b.txt" }),
+    "qa:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 1, { status: "fail" })),
+    },
+    "qa:GROUP-1:iteration-2": {
+      rawOutput: jsonBlock(makeQaArtifact("GROUP-1", 2)),
+    },
+    "qa:GROUP-2:iteration-1": {
+      rawOutput: jsonBlock(makeQaArtifact("GROUP-2", 1)),
+    },
+    doc: { rawOutput: jsonBlock(makeDocArtifact()) },
+    "final-assessment": { rawOutput: jsonBlock(makeFinalAssessmentArtifact()) },
+  };
+
+  const runner = new ScriptedStageRunner(responses);
+  const store = new ArtifactStore({ repoRoot });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    mergeEngine: new SerialAssertingMergeEngine({ repoRoot, artifactStore: store }),
+  });
+
+  const result = await orchestrator.run({
+    request: "补上 orchestrator skeleton 的runtime 代码",
+    runId: "RUN-TEST-EARLY-QA-RETRY",
+  });
+
+  assert.equal(result.verdict, "accept");
+  assert.ok(
+    events.indexOf("group-1-iteration-2-started") < events.indexOf("group-2-execution-finished"),
+    events.join(" -> "),
+  );
+  assert.equal(await fs.readFile(path.join(repoRoot, "src", "group-a.txt"), "utf8"), "qa fixed\n");
+});
+
+test("tree grading waits for all graders to settle before surfacing a grader failure", async () => {
+  const repoRoot = await createRepoFixture();
+  const events = [];
+  const proposalDir = await createProposalDir({
+    "src/app.txt": "ready for grading\n",
+  });
+  const rubric = makeTreeRubrics("GROUP-1", "src/app.txt");
+  const workerGroups = [
+    {
+      group_id: "GROUP-1",
+      tasks: ["TASK-001"],
+      owned_files: ["src/app.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+  ];
+
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: { rawOutput: jsonBlock(makePlanArtifact()) },
+    architecture: { rawOutput: jsonBlock(makeArchitectureArtifact()) },
+    dispatch: {
+      rawOutput: jsonBlock(makeDispatchArtifact(workerGroups)),
+    },
+    "execution:GROUP-1:iteration-1": (request) => ({
+      rawOutput: jsonBlock(
+        makeExecutionArtifact({
+          groupId: "GROUP-1",
+          iteration: 1,
+          baseRef: request.context.baseRef,
+          changedFiles: ["src/app.txt"],
+          proposalRef: "worker://GROUP-1/iteration-1",
+        }),
+      ),
+      proposal: {
+        ref: "worker://GROUP-1/iteration-1",
+        path: proposalDir,
+      },
+    }),
+    "validation:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(makeValidationArtifact("GROUP-1", 1)),
+    },
+    "tree-classification:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(makeTreeClassification("GROUP-1")),
+    },
+    "tree-rubric-generation:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(rubric),
+    },
+    "tree-rubric-verification:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(makeTreeVerification("GROUP-1")),
+    },
+    "tree-rubric-refinement:GROUP-1:iteration-1": {
+      rawOutput: jsonBlock(rubric),
+    },
+    "tree-grading:GROUP-1:iteration-1:grader-1": async () => {
+      events.push("grader-1-started");
+      await sleep(5);
+      events.push("grader-1-failed");
+      throw new Error("synthetic grader failure");
+    },
+    "tree-grading:GROUP-1:iteration-1:grader-2": async () => {
+      events.push("grader-2-started");
+      await sleep(40);
+      events.push("grader-2-finished");
+      return {
+        rawOutput: jsonBlock(
+          makeTreeGradingArtifact({
+            graderId: 2,
+            groupId: "GROUP-1",
+            iteration: 1,
+            rubric,
+          }),
+        ),
+      };
+    },
+    "tree-grading:GROUP-1:iteration-1:grader-3": async () => {
+      events.push("grader-3-started");
+      await sleep(45);
+      events.push("grader-3-finished");
+      return {
+        rawOutput: jsonBlock(
+          makeTreeGradingArtifact({
+            graderId: 3,
+            groupId: "GROUP-1",
+            iteration: 1,
+            rubric,
+          }),
+        ),
+      };
+    },
+  };
+
+  const runner = new ScriptedStageRunner(responses);
+  const store = new ArtifactStore({ repoRoot });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    mergeEngine: new SerialAssertingMergeEngine({ repoRoot, artifactStore: store }),
+    maxStageRetries: 0,
+  });
+
+  await assert.rejects(
+    () =>
+      orchestrator.run({
+        request: "补上 orchestrator skeleton 的runtime 代码",
+        runId: "RUN-TEST-GRADER-SETTLED",
+      }),
+    /tree-grading stage failed: synthetic grader failure/,
+  );
+  assert.deepEqual(events, [
+    "grader-1-started",
+    "grader-2-started",
+    "grader-3-started",
+    "grader-1-failed",
+    "grader-2-finished",
+    "grader-3-finished",
+  ]);
+});
+
+test("terminal execution reject stops same-wave groups before merge", async () => {
+  const repoRoot = await createRepoFixture();
+  const mergeCalls = [];
+  const proposalBDir = await createProposalDir({
+    "src/group-b.txt": "should not merge\n",
+  });
+  const workerGroups = [
+    {
+      group_id: "GROUP-1",
+      tasks: ["TASK-001"],
+      owned_files: ["src/group-a.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+    {
+      group_id: "GROUP-2",
+      tasks: ["TASK-002"],
+      owned_files: ["src/group-b.txt"],
+      depends_on_groups: [],
+      required_skills: [],
+    },
+  ];
+  const mergeEngine = {
+    async mergeProposal({ groupId, iteration, baseRef, proposal, changedFiles = [] }) {
+      mergeCalls.push(groupId);
+      await applyProposalFiles(repoRoot, proposal.path, changedFiles);
+      return {
+        report: {
+          version: "1.0",
+          group_id: groupId,
+          iteration,
+          base_ref: baseRef,
+          mainline_ref: `workspace://${groupId}-before`,
+          proposal_ref: proposal.ref,
+          result_ref: `workspace://${groupId}-merged`,
+          status: "merged",
+          conflicts: [],
+        },
+      };
+    },
+  };
+
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: {
+      rawOutput: jsonBlock(
+        makePlanArtifact(["TASK-001", "TASK-002"], ["src/group-a.txt", "src/group-b.txt"]),
+      ),
+    },
+    architecture: {
+      rawOutput: jsonBlock(
+        makeArchitectureArtifact([
+          {
+            target: "src/group-a.txt",
+            change_type: "modify",
+            description: "Update group A file.",
+            concerns: [],
+          },
+          {
+            target: "src/group-b.txt",
+            change_type: "modify",
+            description: "Update group B file.",
+            concerns: [],
+          },
+        ]),
+      ),
+    },
+    dispatch: {
+      rawOutput: jsonBlock(makeDispatchArtifact(workerGroups)),
+    },
+    "execution:GROUP-1:iteration-1": (request) => ({
+      rawOutput: jsonBlock({
+        version: "1.0",
+        group_id: "GROUP-1",
+        iteration: 1,
+        base_ref: request.context.baseRef,
+        proposal_ref: "worker://GROUP-1/iteration-1",
+        applied_skills: [],
+        status: "blocked",
+        changed_files: [],
+        requirements_covered: [],
+        frontend_design_summary: null,
+        tests_run: [],
+        follow_up_notes: [],
+        blockers: [
+          "REPLAN_REQUIRED: retry needs files outside worker_group.owned_files",
+        ],
+      }),
+    }),
+    "execution:GROUP-2:iteration-1": async (request) => {
+      await sleep(50);
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: "GROUP-2",
+            iteration: 1,
+            baseRef: request.context.baseRef,
+            changedFiles: ["src/group-b.txt"],
+            proposalRef: "worker://GROUP-2/iteration-1",
+          }),
+        ),
+        proposal: {
+          ref: "worker://GROUP-2/iteration-1",
+          path: proposalBDir,
+        },
+      };
+    },
+  };
+
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: new ScriptedStageRunner(responses),
+    mergeEngine,
+  });
+
+  const result = await orchestrator.run({
+    request: "补上 orchestrator skeleton 的runtime 代码",
+    runId: "RUN-TEST-TERMINAL-STOP",
+  });
+
+  assert.equal(result.verdict, "reject");
+  assert.equal(result.restartFrom, "dispatch");
+  assert.deepEqual(mergeCalls, []);
+  assert.equal(await fs.readFile(path.join(repoRoot, "src", "group-b.txt"), "utf8"), "base-b\n");
+});
+
+test("subagent stages respect the configured concurrent slot limit", async () => {
+  const repoRoot = await createRepoFixture();
+  const files = ["src/group-a.txt", "src/group-b.txt", "src/group-c.txt", "src/group-d.txt"];
+  await Promise.all(
+    files.slice(2).map((file, index) =>
+      fs.writeFile(path.join(repoRoot, file), `base-${index + 3}\n`, "utf8"),
+    ),
+  );
+  const proposalDirs = await Promise.all(
+    files.map((file, index) => createProposalDir({ [file]: `updated-${index + 1}\n` })),
+  );
+  const workerGroups = files.map((file, index) => ({
+    group_id: `GROUP-${index + 1}`,
+    tasks: [`TASK-${String(index + 1).padStart(3, "0")}`],
+    owned_files: [file],
+    depends_on_groups: [],
+    required_skills: [],
+  }));
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: {
+      rawOutput: jsonBlock(
+        makePlanArtifact(
+          workerGroups.map((group) => group.tasks[0]),
+          files,
+        ),
+      ),
+    },
+    architecture: {
+      rawOutput: jsonBlock(
+        makeArchitectureArtifact(
+          files.map((file) => ({
+            target: file,
+            change_type: "modify",
+            description: `Update ${file}.`,
+            concerns: [],
+          })),
+        ),
+      ),
+    },
+    dispatch: {
+      rawOutput: jsonBlock(makeDispatchArtifact(workerGroups)),
+    },
+    doc: { rawOutput: jsonBlock(makeDocArtifact()) },
+    "final-assessment": { rawOutput: jsonBlock(makeFinalAssessmentArtifact()) },
+  };
+
+  workerGroups.forEach((group, index) => {
+    const iteration = 1;
+    responses[`execution:${group.group_id}:iteration-${iteration}`] = async (request) => {
+      await sleep(15);
+      return {
+        rawOutput: jsonBlock(
+          makeExecutionArtifact({
+            groupId: group.group_id,
+            iteration,
+            baseRef: request.context.baseRef,
+            changedFiles: group.owned_files,
+            proposalRef: `worker://${group.group_id}/iteration-${iteration}`,
+          }),
+        ),
+        proposal: {
+          ref: `worker://${group.group_id}/iteration-${iteration}`,
+          path: proposalDirs[index],
+        },
+      };
+    };
+    responses[`validation:${group.group_id}:iteration-${iteration}`] = {
+      rawOutput: jsonBlock(makeValidationArtifact(group.group_id, iteration)),
+    };
+    Object.assign(
+      responses,
+      makeTreeStageResponses({
+        groupId: group.group_id,
+        iteration,
+        outputFile: group.owned_files[0],
+      }),
+    );
+    responses[`qa:${group.group_id}:iteration-${iteration}`] = {
+      rawOutput: jsonBlock(makeQaArtifact(group.group_id, iteration)),
+    };
+  });
+
+  const runner = new ScriptedStageRunner(responses);
+  const originalRunStage = runner.runStage.bind(runner);
+  let active = 0;
+  let maxActive = 0;
+  runner.runStage = async (request) => {
+    active += 1;
+    maxActive = Math.max(maxActive, active);
+    try {
+      await sleep(5);
+      return await originalRunStage(request);
+    } finally {
+      active -= 1;
+    }
+  };
+  const store = new ArtifactStore({ repoRoot });
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+    artifactStore: store,
+    mergeEngine: new SerialAssertingMergeEngine({ repoRoot, artifactStore: store }),
+    maxConcurrentSubagents: 3,
+  });
+
+  const result = await orchestrator.run({
+    request: "补上 orchestrator skeleton 的runtime 代码",
+    runId: "RUN-TEST-SLOT-LIMIT",
+  });
+
+  assert.equal(result.verdict, "accept");
+  assert.ok(maxActive <= 3, `expected max active stages <= 3, got ${maxActive}`);
+});
+
+test("execution can request re-dispatch when retry expansion exceeds ownership", async () => {
+  const repoRoot = await createRepoFixture();
+  const responses = {
+    spec: { rawOutput: jsonBlock(makeSpecArtifact()) },
+    plan: { rawOutput: jsonBlock(makePlanArtifact()) },
+    architecture: { rawOutput: jsonBlock(makeArchitectureArtifact()) },
+    dispatch: {
+      rawOutput: jsonBlock(
+        makeDispatchArtifact([
+          {
+            group_id: "GROUP-1",
+            tasks: ["TASK-001"],
+            owned_files: ["src/app.txt"],
+            depends_on_groups: [],
+            required_skills: [],
+          },
+        ]),
+      ),
+    },
+    "execution:GROUP-1:iteration-1": (request) => {
+      assert.equal(request.context.iterationPolicy.replan_blocker_prefix, "REPLAN_REQUIRED:");
+      return {
+        rawOutput: jsonBlock({
+          version: "1.0",
+          group_id: "GROUP-1",
+          iteration: 1,
+          base_ref: request.context.baseRef,
+          proposal_ref: "worker://GROUP-1/iteration-1",
+          applied_skills: [],
+          status: "blocked",
+          changed_files: [],
+          requirements_covered: [],
+          frontend_design_summary: null,
+          tests_run: [],
+          follow_up_notes: [],
+          blockers: [
+            "REPLAN_REQUIRED: retry needs files outside worker_group.owned_files",
+          ],
+        }),
+      };
+    },
+  };
+
+  const runner = new ScriptedStageRunner(responses);
+  const orchestrator = new PipelineOrchestrator({
+    repoRoot,
+    stageRunner: runner,
+  });
+
+  const result = await orchestrator.run({
+    request: "补上 orchestrator skeleton 的runtime 代码",
+    runId: "RUN-TEST-REPLAN-REQUIRED",
+  });
+
+  assert.equal(result.verdict, "reject");
+  assert.equal(result.restartFrom, "dispatch");
 });
 
 test("resumeAfterConflict consumes conflict-resolution artifacts and passes recovery context to final assessment", async () => {

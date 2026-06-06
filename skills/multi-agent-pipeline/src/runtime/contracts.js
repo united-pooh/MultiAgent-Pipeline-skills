@@ -8,6 +8,8 @@ import { ContractValidationError } from "./errors.js";
 import { CODEX_PET_STATES } from "./pet-events.js";
 import { uniqueStrings } from "./utils.js";
 
+const MAX_DISPATCH_GROUPS_PER_WAVE = 6;
+
 function fail(artifactName, message) {
   throw new ContractValidationError(artifactName, message);
 }
@@ -441,6 +443,12 @@ function validateDispatch(artifact, context = {}) {
     const groups = expectStringArray(entry.groups, `execution_waves[${index}].groups`, artifactName, {
       minLength: 1,
     });
+    if (groups.length > MAX_DISPATCH_GROUPS_PER_WAVE) {
+      fail(
+        artifactName,
+        `execution_waves[${index}].groups exceeds max of ${MAX_DISPATCH_GROUPS_PER_WAVE} groups per wave`,
+      );
+    }
 
     const seenFiles = new Set();
     for (const groupId of groups) {
@@ -628,6 +636,13 @@ function validateExecutionReport(artifact, context = {}) {
 
   if (report.status === "blocked" && blockers.length === 0) {
     fail(artifactName, "blockers must be non-empty when status is blocked");
+  }
+
+  const replanBlockerIndex = blockers.findIndex((blocker) =>
+    blocker.trimStart().startsWith("REPLAN_REQUIRED:"),
+  );
+  if (replanBlockerIndex > 0) {
+    fail(artifactName, "REPLAN_REQUIRED must be the first blocker when present");
   }
 
   return report;

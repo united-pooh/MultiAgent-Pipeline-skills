@@ -265,7 +265,7 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
 - `worker_groups`: Each group contains one or more tasks from `plan.json` and the files those tasks own, derived from `architecture.json.proposed_changes`. No file may appear in more than one group's `owned_files` within the same execution wave.
 - `depends_on_groups`: References other group IDs. A group can only begin execution after all groups it depends on have completed. Empty array when no inter-group dependency exists.
 - `required_skills`: Deterministic union of `concerns` for the files owned by that group. Map `frontend_design` to `ce-frontend-design`. Use an empty array when no routed skill is required.
-- `execution_waves`: Groups with no unresolved `depends_on_groups` run in the same wave. Waves execute sequentially; groups within a wave execute concurrently. At least one wave must be produced.
+- `execution_waves`: Groups with no unresolved `depends_on_groups` launch Execution in the same wave. Execution launch waves are sequential, but downstream Validation, Tree Rubrics, Tree Grading, and QA are per-group and may start early as each group finishes Execution. At least one wave must be produced, and each wave must list 1 to 6 groups.
 - `integration_strategy`: Must always be `{ "merge_mode": "three_way", "conflict_policy": "pause_for_human", "base_strategy": "wave_start_snapshot" }` in this pipeline version.
 - `rationale`: A plain-language explanation of why the tasks were grouped this way and what tradeoffs were made.
 
@@ -325,7 +325,7 @@ Consumed by: **Complexity Hook**, **Merge Stage**, **Validation Agent**, **Revie
 - `requirements_covered`: Reference requirement IDs from `spec.json`.
 - `frontend_design_summary`: Must be non-null when `applied_skills` includes `ce-frontend-design`. Must be `null` when no frontend-design routing applied.
 - `tests_run`: Include every command attempted. Use `not_run` only when a test was intentionally skipped.
-- `blockers`: Empty array when `status` is `implemented`.
+- `blockers`: Empty array when `status` is `implemented`. When `status` is `blocked` because the retry requires unowned files, cross-group ownership changes, or a different worker split, start the first blocker with `REPLAN_REQUIRED:` so the orchestrator can restart from Dispatch.
 
 ---
 

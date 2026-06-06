@@ -12,6 +12,16 @@ Use these templates as default host-specific stage prompt scaffolds. Fill the pl
 - For retries or rework passes, name the triggering artifact and the current iteration.
 - For `Execution`, include the Playwright skill path only when real browser validation may be required.
 - For `Spec` and `Plan`, attach the `superpowers` skill and explicitly restrict it to brainstorming/planning discipline.
+- Maintain one global 6-slot subagent pool across Execution, Validation, Tree
+  Rubrics, Tree Grading, and QA. Every spawned subagent in those stages consumes
+  one slot until it finishes.
+- Dispatch fanout is capped at 6 groups per wave and should maximize safe
+  concurrency up to 6 without inventing unsafe splits.
+- Let finished groups continue early into Validation, Tree Rubrics, Tree
+  Grading, and QA as soon as dependencies are satisfied and slots are
+  available; do not wait for the whole execution wave.
+- Tree Grading consumes 3 slots by default. Wait until 3 slots are available,
+  then spawn the 3 graders together.
 - Select the host adapter first. Codex and OpenCode use the same stage prompts and contracts but different tool schemas.
 
 ## Codex Adapter
@@ -208,6 +218,9 @@ Inputs:
 <paste architecture.json content>
 
 Partition work into dependency-respecting worker groups with explicit file ownership.
+Each execution wave must contain at most 6 groups. Maximize safe concurrency up
+to 6 groups, merge excess independent components by affinity, and never invent
+unsafe splits.
 Derive `required_skills` only from `architecture.json.proposed_changes[].concerns`.
 Produce `dispatch.json`.
 Return exactly one fenced `json` block and no extra prose.
@@ -265,13 +278,20 @@ Inputs:
 <paste plan.json content>
 - architecture.json:
 <paste architecture.json content>
+- assigned worker_group from dispatch.json:
+<paste worker_group content>
+- base_ref:
+<paste base_ref>
 - latest tree_grading_feedback.json: <paste content or omit>
 - validation-report.json from the previous attempt: <paste content or omit>
+- qa-report.json from the previous attempt: <paste content or omit>
 - Repo root: <repo_root>
 - Iteration: <n>
 
-Implement only within the ownership implied by `architecture.json`.
+Implement only within `worker_group.owned_files` plus directly adjacent tests or docs needed for this group.
 You are not alone in the codebase; do not revert unrelated edits.
+On retries, you may add related same-group local goals inside the same ownership boundary.
+If the fix requires unowned files, cross-group ownership changes, or a different worker split, return `status = "blocked"` and start the first blocker with `REPLAN_REQUIRED:`.
 If the architecture cannot be implemented cleanly within constraints, return `status = "blocked"` and route upward with `recommended_next_stage` plus `rework_reason`.
 Return exactly one fenced `json` block and no extra prose.
 ```
@@ -339,7 +359,10 @@ Return exactly one fenced `json` block and no extra prose.
 
 ## Tree Rubrics Generation And Grading
 
-Run these stages after Validation passes or skips for a worker group.
+Run these stages after Validation passes or skips for a worker group. A group
+may enter this sequence as soon as it is ready and a global pool slot is
+available, even when other groups from the same execution wave are still
+running.
 
 ### Tree Classification
 
@@ -424,7 +447,8 @@ Return exactly one fenced `json` block with `tree_rubrics_refined.json` and no e
 
 ### Tree Grading
 
-Spawn all 3 graders before waiting on them.
+Tree Grading consumes 3 global pool slots by default. Wait until all 3 slots
+are available, then spawn all 3 graders before waiting on them.
 
 ```text
 Follow:
@@ -599,6 +623,11 @@ Inputs:
 - Repo root: <repo_root>
 
 Run dynamic or scenario validation that is not already covered by command-layer Validation.
+If QA finds a blocking issue, record the same-group repair evidence or
+ownership/dependency concern in `blocking_issues` and `notes`. The orchestrator
+passes failed `qa-report.json` to Execution; Execution owns retry work and emits
+`REPLAN_REQUIRED:` as its first blocker when a different ownership split or
+re-dispatch is required.
 Return exactly one fenced `json` block with `qa-report.json` and no extra prose.
 ```
 
