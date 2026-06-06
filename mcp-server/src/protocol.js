@@ -50,8 +50,19 @@ export function createMcpProtocol({
 
     const id = message.id ?? null;
     const params = message.params ?? {};
+    const notification = isNotification(message);
 
     try {
+      if (notification) {
+        switch (message.method) {
+          case "notifications/initialized":
+            await store.ensureInitialized();
+            return null;
+          default:
+            return null;
+        }
+      }
+
       switch (message.method) {
         case "initialize":
           await store.ensureInitialized();
@@ -106,14 +117,10 @@ export function createMcpProtocol({
         case "prompts/get":
           return jsonRpcResult(id, await getPrompt(params.name, params.arguments ?? {}, context));
         default:
-          if (isNotification(message)) {
-            return null;
-          }
-
           return jsonRpcError(id, -32601, `Method not found: ${message.method}`);
       }
     } catch (error) {
-      if (isNotification(message)) {
+      if (notification) {
         return null;
       }
 

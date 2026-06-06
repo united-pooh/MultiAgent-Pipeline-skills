@@ -128,15 +128,38 @@ export class RunStore {
       maxIterations: thresholds.maxIterations ?? null,
       budget: thresholds.budget ?? null,
     };
-    const idempotencyHash = hashValue({
-      repoRoot: this.repoRoot,
-      objective: objective.trim(),
-      input,
-      thresholds: normalizedThresholds,
-      idempotencyKey,
-      mode,
-    });
+    const idempotencyHash = idempotencyKey
+      ? hashValue({
+          repoRoot: this.repoRoot,
+          idempotencyKey,
+        })
+      : hashValue({
+          repoRoot: this.repoRoot,
+          objective: objective.trim(),
+          input,
+          thresholds: normalizedThresholds,
+          mode,
+        });
     const index = await this.readIndex();
+    if (idempotencyKey) {
+      for (const runId of index.runs ?? []) {
+        const indexedRun = await readJson(path.join(this.runDir(runId), "run.json"), null);
+        if (indexedRun?.repoRoot === this.repoRoot && indexedRun.idempotencyKey === idempotencyKey) {
+          index.idempotency[idempotencyHash] = runId;
+          await this.writeIndex(index);
+          const existingRun = await this.getRun(runId);
+          await this.appendEvent(runId, {
+            type: "run.idempotent_key_hit",
+            message: "Returned existing durable run for matching explicit idempotency key.",
+          });
+          return {
+            ...existingRun,
+            idempotent: true,
+          };
+        }
+      }
+    }
+
     const existingRunId = index.idempotency[idempotencyHash];
     if (existingRunId) {
       const existingRun = await this.getRun(existingRunId);

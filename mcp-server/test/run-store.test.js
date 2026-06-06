@@ -35,6 +35,49 @@ test("RunStore creates idempotent durable runs and event logs", async () => {
   await fs.access(path.join(repoRoot, ".pipeline-runs", first.run.runId, "state.json"));
 });
 
+test("RunStore treats an explicit idempotency key as the durable identity", async () => {
+  const repoRoot = await createTempRepo();
+  const store = new RunStore({ repoRoot, clock: fixedClock });
+
+  const first = await store.createRun({
+    objective: "Migrate pipeline to MCP",
+    idempotencyKey: "same-user-intent",
+  });
+  const second = await store.createRun({
+    objective: "Migrate pipeline to MCP with clarified wording",
+    idempotencyKey: "same-user-intent",
+    thresholds: {
+      maxIterations: 99,
+    },
+  });
+
+  assert.equal(second.run.runId, first.run.runId);
+  assert.equal(second.run.objective, "Migrate pipeline to MCP");
+  assert.equal((await store.listRuns()).length, 1);
+});
+
+test("RunStore recovers explicit idempotency matches even when the hash index is stale", async () => {
+  const repoRoot = await createTempRepo();
+  const store = new RunStore({ repoRoot, clock: fixedClock });
+  const first = await store.createRun({
+    objective: "Migrate pipeline to MCP",
+    idempotencyKey: "stale-index-key",
+  });
+  await fs.writeFile(
+    path.join(repoRoot, ".pipeline-runs", "index.json"),
+    JSON.stringify({ version: "1.0", runs: [first.run.runId], idempotency: {} }, null, 2),
+    "utf8",
+  );
+
+  const recovered = await store.createRun({
+    objective: "Migrate pipeline to MCP after index algorithm changed",
+    idempotencyKey: "stale-index-key",
+  });
+
+  assert.equal(recovered.run.runId, first.run.runId);
+  assert.equal((await store.listRuns()).length, 1);
+});
+
 test("RunStore records stage output, research, checkpoint metadata, and cancellation", async () => {
   const repoRoot = await createTempRepo();
   const store = new RunStore({ repoRoot, clock: fixedClock });

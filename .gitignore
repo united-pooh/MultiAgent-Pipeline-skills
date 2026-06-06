@@ -5,4 +5,5 @@ __pycache__/
 .ruff_cache/
 .venv/
 .pipeline-workspace/
+.pipeline-runs/
 docs/superpowers/

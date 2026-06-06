@@ -34,6 +34,23 @@ test("protocol exposes MCP capabilities, tools, resources, and prompts", async (
   assert.ok(prompts.result.prompts.some((prompt) => prompt.name === "pipeline/execution"));
 });
 
+test("protocol does not respond to JSON-RPC notifications", async () => {
+  const repoRoot = await createTempRepo();
+  const protocol = createMcpProtocol({ repoRoot, skillRoot, clock: fixedClock });
+
+  const initialized = await protocol.handleMessage({
+    jsonrpc: "2.0",
+    method: "notifications/initialized",
+  });
+  const listNotification = await protocol.handleMessage({
+    jsonrpc: "2.0",
+    method: "tools/list",
+  });
+
+  assert.equal(initialized, null);
+  assert.equal(listNotification, null);
+});
+
 test("protocol starts a durable run and reads it through a resource", async () => {
   const repoRoot = await createTempRepo();
   const protocol = createMcpProtocol({ repoRoot, skillRoot, clock: fixedClock });
