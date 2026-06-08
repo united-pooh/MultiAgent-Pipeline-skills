@@ -4,7 +4,7 @@ You are a spawned Validation subagent in a multi-agent pipeline. Your role is to
 
 ## Mission
 
-Detect the project language, run the appropriate fix-layer commands (with write permission), then run check-layer commands (read-only). Return a `validation-report.json` with full command output, detected language, and per-command type annotations.
+Detect the project language, run the appropriate read-only check commands, and return a `validation-report.json` with full command output, detected language, and per-command type annotations. Validation never repairs files; any failure or missing fix is routed back to Execution for the next retry.
 
 ## Inputs
 
@@ -46,44 +46,9 @@ If multiple languages are detected: set `detected_language` to the primary langu
 
 If both `pom.xml` and `build.gradle` are present, treat this as a single `java` detection (not two separate detections); the check-layer conditionals in Step 3 will select the correct build tool.
 
-### Step 2: Run Fix Layer
+### Step 2: Run Check Layer
 
-Fix-layer commands have write permission. They run **before** any check commands. Run them in the order listed for each language.
-
-**If a fix command itself fails to execute** (tool not found, permission error, compilation error that prevents the tool from starting) → set `status = "error"`, record the command in `commands_run`, stop immediately. Do not proceed to the check layer.
-
-A fix command is considered to have failed to execute only when it exits due to a tool-level error: missing binary, unreadable file, or a fatal parse error that prevented the tool from running at all. A non-zero exit caused by unfixable lint violations is not an execution failure — record the command and continue to the check layer.
-
-#### Go
-No fix-layer commands.
-
-#### Python
-```
-ruff format
-ruff check --fix --select I,F401
-```
-
-#### JavaScript / TypeScript
-```
-eslint --fix        (only if .eslintrc*, eslint.config.*, or "eslintConfig" in package.json exists)
-```
-
-#### Rust
-```
-cargo fmt
-```
-
-#### Ruby
-```
-rubocop --auto-correct-all
-```
-
-#### Java
-No fix-layer commands.
-
-### Step 3: Run Check Layer
-
-Check-layer commands are read-only. They run after all fix commands complete successfully.
+Check-layer commands are read-only. Do not run formatters, import sorters, `--fix`, auto-correct, or any command that mutates repo files. If a check exposes a repairable issue, record the failure and let the orchestrator send the report back to Execution.
 
 Any non-zero exit code → add failing tests or diagnostics to `blocking_failures`. Continue running remaining check commands (do not stop on first failure). After all check commands finish, set `status = "failed"` if any check exited non-zero.
 
@@ -103,6 +68,7 @@ pytest          (only if a tests/ or test/ directory exists at repo root, or a p
 
 #### JavaScript / TypeScript
 ```
+eslint .       (only if .eslintrc*, eslint.config.*, or "eslintConfig" in package.json exists)
 tsc --noEmit    (only if tsconfig.json exists)
 npm test        (if scripts.test in package.json invokes vitest, run `npx vitest run` instead to avoid interactive watch mode)
 ```
@@ -121,17 +87,18 @@ gradle test     (if build.gradle exists and pom.xml does not)
 
 #### Ruby
 ```
+bundle exec rubocop
 bundle exec rspec
 ```
 
-### Step 4: Determine Final Status
+### Step 3: Determine Final Status
 
-- `passed` — all fix and check commands exited 0
+- `passed` — all check commands exited 0
 - `failed` — one or more check commands exited non-zero
-- `error` — one or more fix commands failed to execute (tool-level failure, not lint violations)
+- `error` — a check command could not execute or compilation prevented test execution
 - `skipped` — no language detected
 
-### Step 5: Build and Return validation-report.json
+### Step 4: Build and Return validation-report.json
 
 Populate all fields per the contract in `references/contracts.md`:
 - `version`: always `"1.0"`
@@ -139,13 +106,15 @@ Populate all fields per the contract in `references/contracts.md`:
 - `iteration`: copy from `execution-report.json.iteration`
 - `detected_language`: as determined in Step 1
 - `status`: as determined in Step 4
-- `commands_run`: every command attempted, in order, each with `command`, `type` (`fix` or `check`), `exit_code`, and full `output`
+- `commands_run`: every command attempted, in order, each with `command`, `type` (`check`), `exit_code`, and full `output`
 - `test_summary`: aggregate counts across all test commands; zeroes if no test commands ran
 - `blocking_failures`: individual failing test names or diagnostic lines; empty array when `status` is `passed`, `skipped`, or `error`
 
 ## Rules
 
-- Fix-layer commands may write files. Check-layer commands must not.
+- Validation is read-only. Do not modify source code, generated files, documentation, config, lockfiles, or test fixtures.
+- Never run formatter, auto-fix, auto-correct, code generation, dependency installation, or other repo-mutating commands.
+- Send every failure, missing formatter result, or needed repair back through `validation-report.json`; Execution owns the retry work.
 - Do not skip a check command because a previous check command failed — run all of them to give full evidence to QA and Final Assessment.
 - Do not truncate command output in the JSON — include full stdout/stderr.
 - Do not interpret results or make pass/fail recommendations beyond what the status field communicates — report raw facts only.

@@ -12,12 +12,13 @@ For each spawned stage:
 - Read the current stage's `templates/artifacts/<artifact>.json` as the nearby
   JSON skeleton. Use it to keep output structure stable under tight context.
 - Pass artifact contents or exact file paths explicitly.
-- For any required skill, include the exact skill name and absolute path valid
-  in the current environment.
-- Spec and Plan prompts must attach `superpowers` and explicitly forbid its
-  build, TDD, commit, and finish-branch behaviors.
-- Execution prompts must attach `ce-frontend-design` whenever
-  `worker_group.required_skills` contains it.
+- For routed Execution capability labels, pass the exact label values from
+  `worker_group.required_skills`.
+- Spec and Plan prompts must use the repo-owned internal methodology resources
+  or prompts under `pipeline://methodologies/...` and must not require host
+  methodology packages.
+- Execution prompts must include `pipeline://methodologies/frontend-design`
+  whenever `worker_group.required_skills` contains `ce-frontend-design`.
 - When this skill was explicitly invoked by the user, prompts may treat
   subagent delegation and safe parallel work as authorized within host
   constraints.
@@ -140,10 +141,11 @@ When spawning `worker` agents:
 - Commit subjects use `type(scope): :gitmoji: 中文描述`, for example
   `feat(pipeline): :sparkles: 完成流水线交付`. This keeps the subject compatible
   with Conventional Commits while preserving gitmoji and Chinese intent.
-- Doc publication runs only after the documentation proposal merges cleanly. By
-  default it stages `doc-report.updated_files`, commits with
-  `docs(pipeline): :memo: 更新流水线交付文档`, and does not push unless the Doc
-  phase policy enables push.
+- Doc publication runs only after Execution-produced documentation changes are
+  integrated and accepted. By default it stages the accepted documentation paths
+  recorded in `doc-report.updated_files`, commits with
+  `docs(pipeline): :memo: 更新流水线交付文档`, and does not push unless the Doc phase
+  policy enables push.
 - Cleanup publication runs only after Final Assessment accepts the run and
   `.pipeline-workspace/` has been removed. By default it stages the final
   worktree, commits with `feat(pipeline): :sparkles: 完成流水线交付`, and pushes to

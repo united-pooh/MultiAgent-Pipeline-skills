@@ -162,8 +162,9 @@ Expected: no output and exit code 0.
 Run:
 
 ```bash
-rsync -a --delete /Users/united_pooh/Downloads/multi-agent-pipeline/skills/multi-agent-pipeline/ /Users/united_pooh/.codex/skills/multi-agent-pipeline/
-diff -qr /Users/united_pooh/.codex/skills/multi-agent-pipeline /Users/united_pooh/Downloads/multi-agent-pipeline/skills/multi-agent-pipeline
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+rsync -a --delete "$PWD/skills/multi-agent-pipeline/" "$CODEX_HOME/skills/multi-agent-pipeline/"
+diff -qr "$CODEX_HOME/skills/multi-agent-pipeline" "$PWD/skills/multi-agent-pipeline"
 ```
 
 Expected: `diff -qr` emits no differences.

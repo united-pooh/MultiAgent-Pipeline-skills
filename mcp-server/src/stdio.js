@@ -6,7 +6,7 @@ export function startStdioServer({
   input = process.stdin,
   output = process.stdout,
   errorOutput = process.stderr,
-  repoRoot = process.cwd(),
+  repoRoot,
   skillRoot,
   clock,
 } = {}) {

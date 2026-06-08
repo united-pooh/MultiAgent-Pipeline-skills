@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "report_path": "research-reports/2026-W23/agent-engineering-landing.md",
+  "generated_for_date": "2026-06-08",
+  "sources_seen": [
+    {
+      "source_id": "SRC-001",
+      "source_type": "paper",
+      "title": "Agent engineering benchmark notes",
+      "locator": "https://example.com/agent-engineering"
+    }
+  ],
+  "candidate_index": [
+    {
+      "candidate_id": "CAND-001",
+      "title": "Runtime artifact validation",
+      "status": "selected"
+    }
+  ],
+  "evidence_map": [
+    {
+      "candidate_id": "CAND-001",
+      "source_ids": ["SRC-001"],
+      "summary": "The landing plan needs artifact contracts before orchestration can replay runs."
+    }
+  ],
+  "rubric": {
+    "criteria": ["contract coverage", "fixture quality"],
+    "minimum_evidence_count": 1
+  },
+  "output_validation": {
+    "status": "passed",
+    "checks": ["all selected candidates have evidence"]
+  }
+}

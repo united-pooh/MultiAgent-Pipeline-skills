@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { STAGE_PROMPTS } from "./prompts.js";
+import { METHODOLOGY_PROMPTS, STAGE_PROMPTS } from "./prompts.js";
+import { TOOL_DEFINITIONS } from "./tools.js";
 
 const CONTRACT_RESOURCE_TYPES = [
   "spec",
@@ -19,7 +20,32 @@ const CONTRACT_RESOURCE_TYPES = [
   "qa-report",
   "doc-report",
   "final-assessment",
+  "research-harness-state",
+  "context-manifest",
+  "agent-trace",
+  "state-store-snapshot",
+  "cache-observability-report",
+  "governance-report",
+  "protocol-dag",
+  "serving-profile",
+  "latent-communication-experiment",
 ];
+
+const TOOL_CATEGORY_BY_NAME = new Map([
+  ["pipeline.start_run", "run"],
+  ["pipeline.get_run", "run"],
+  ["pipeline.list_runs", "run"],
+  ["pipeline.cancel_run", "control"],
+  ["pipeline.resume_run", "control"],
+  ["pipeline.submit_human_input", "human-input"],
+  ["pipeline.run_stage", "stage"],
+  ["pipeline.validate_artifact", "validation"],
+  ["pipeline.inspect_workspace", "workspace"],
+  ["pipeline.export_summary", "run"],
+  ["pipeline.commit_checkpoint", "git"],
+  ["pipeline.research", "research"],
+  ["pipeline.install_codex_adapter", "adapter"],
+]);
 
 function textResource(uri, text, mimeType = "application/json") {
   return {
@@ -43,6 +69,39 @@ async function readJsonIfExists(filePath, fallback) {
 
     throw error;
   }
+}
+
+function compactToolCategory(name) {
+  return TOOL_CATEGORY_BY_NAME.get(name) ?? "other";
+}
+
+function compactToolsResource() {
+  return {
+    version: "1.0",
+    tools: TOOL_DEFINITIONS.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      category: compactToolCategory(tool.name),
+    })).sort((left, right) => left.name.localeCompare(right.name)),
+  };
+}
+
+function methodologyIndexResource() {
+  return `# Internal Methodologies
+
+The Multi-Agent Pipeline MCP server owns these methodology references. Use them
+through resources or prompts without depending on separate host skill packages.
+
+- pipeline://methodologies/superpowers
+- pipeline://methodologies/brainstorming
+- pipeline://methodologies/frontend-design
+
+Prompts:
+
+- pipeline/methodology/superpowers
+- pipeline/methodology/brainstorming
+- pipeline/methodology/frontend-design
+`;
 }
 
 export async function listResources({ store }) {
@@ -86,6 +145,41 @@ export async function listResources({ store }) {
       description: "Pipeline workspace and installation summary.",
       mimeType: "application/json",
     },
+    {
+      uri: "pipeline://tools/compact",
+      name: "tools-compact",
+      title: "Compact Tool Surface",
+      description: "Compact tool metadata without schemas or long descriptions.",
+      mimeType: "application/json",
+    },
+    {
+      uri: "pipeline://methodologies",
+      name: "methodologies",
+      title: "Internal Methodologies",
+      description: "Repo-owned methodology index for pipeline stages.",
+      mimeType: "text/markdown",
+    },
+    {
+      uri: "pipeline://methodologies/superpowers",
+      name: "methodology-superpowers",
+      title: "Superpowers Methodology",
+      description: "Repo-owned Superpowers methodology reference.",
+      mimeType: "text/markdown",
+    },
+    {
+      uri: "pipeline://methodologies/brainstorming",
+      name: "methodology-brainstorming",
+      title: "Brainstorming Methodology",
+      description: "Repo-owned Brainstorming methodology reference.",
+      mimeType: "text/markdown",
+    },
+    {
+      uri: "pipeline://methodologies/frontend-design",
+      name: "methodology-frontend-design",
+      title: "Frontend Design Methodology",
+      description: "Repo-owned frontend design capability reference.",
+      mimeType: "text/markdown",
+    },
     ...CONTRACT_RESOURCE_TYPES.map((artifactType) => ({
       uri: `pipeline://contracts/${artifactType}`,
       name: `contract-${artifactType}`,
@@ -98,6 +192,13 @@ export async function listResources({ store }) {
       name: `prompt-${name.slice("pipeline/".length)}`,
       title: `${name} Prompt`,
       description: "Pipeline stage prompt source.",
+      mimeType: "text/markdown",
+    })),
+    ...METHODOLOGY_PROMPTS.map(([name]) => ({
+      uri: `pipeline://prompts/${name.slice("pipeline/".length)}`,
+      name: `prompt-${name.slice("pipeline/".length).replaceAll("/", "-")}`,
+      title: `${name} Prompt`,
+      description: "Pipeline methodology prompt source.",
       mimeType: "text/markdown",
     })),
     ...runResources,
@@ -144,6 +245,25 @@ export async function readResource(uri, { store, skillRoot }) {
     return textResource(uri, await store.inspectWorkspace());
   }
 
+  if (parsed.hostname === "tools" && parsed.pathname === "/compact") {
+    return textResource(uri, compactToolsResource());
+  }
+
+  if (parsed.hostname === "methodologies") {
+    if (parsed.pathname === "") {
+      return textResource(uri, methodologyIndexResource(), "text/markdown");
+    }
+
+    const methodology = parsed.pathname.slice(1);
+    const promptFile = METHODOLOGY_PROMPTS.find(([name]) => name === `pipeline/methodology/${methodology}`)?.[1];
+    if (!promptFile) {
+      throw new Error(`Unknown methodology resource: ${uri}`);
+    }
+
+    const text = await fs.readFile(path.join(skillRoot, "references", "methodologies", promptFile), "utf8");
+    return textResource(uri, text, "text/markdown");
+  }
+
   if (parsed.hostname === "contracts") {
     const contractsText = await fs.readFile(path.join(skillRoot, "references", "contracts.md"), "utf8");
     return textResource(uri, contractsText, "text/markdown");
@@ -151,12 +271,17 @@ export async function readResource(uri, { store, skillRoot }) {
 
   if (parsed.hostname === "prompts") {
     const stage = parsed.pathname.slice(1);
-    const promptFile = STAGE_PROMPTS.find(([name]) => name === `pipeline/${stage}`)?.[1];
+    const promptFile =
+      STAGE_PROMPTS.find(([name]) => name === `pipeline/${stage}`)?.[1]
+      ?? METHODOLOGY_PROMPTS.find(([name]) => name === `pipeline/${stage}`)?.[1];
     if (!promptFile) {
       throw new Error(`Unknown prompt resource: ${uri}`);
     }
 
-    const text = await fs.readFile(path.join(skillRoot, "agents", promptFile), "utf8");
+    const promptPath = stage.startsWith("methodology/")
+      ? path.join(skillRoot, "references", "methodologies", promptFile)
+      : path.join(skillRoot, "agents", promptFile);
+    const text = await fs.readFile(promptPath, "utf8");
     return textResource(uri, text, "text/markdown");
   }
 

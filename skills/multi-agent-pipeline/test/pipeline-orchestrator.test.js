@@ -8,7 +8,9 @@ import { fileURLToPath } from "node:url";
 import {
   ArtifactStore,
   CODEX_PET_STATES,
+  DEFAULT_ORCHESTRATOR_WRITE_AUTHORITY,
   DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES,
+  DEFAULT_STAGE_WRITE_AUTHORITY,
   MergeEngine,
   PipelineOrchestrator,
   aggregateReviewFeedback,
@@ -46,7 +48,7 @@ function sleep(ms) {
 function makeSpecArtifact() {
   return {
     version: "1.0",
-    applied_skills: ["superpowers"],
+    applied_skills: [],
     feature_name: "Add orchestrator runtime",
     objective: "Implement the orchestrator runtime skeleton for the multi-agent pipeline.",
     requirements: [
@@ -70,7 +72,7 @@ function makeSpecArtifact() {
 function makePlanArtifact(taskIds = ["TASK-001"], targetFiles = ["src/app.txt"]) {
   return {
     version: "1.0",
-    applied_skills: ["superpowers"],
+    applied_skills: [],
     spec_ref: "spec.json",
     phases: [
       {
@@ -466,14 +468,7 @@ function makeFinalAssessmentArtifact(overrides = {}) {
     improvement_areas: overrides.improvement_areas ?? [],
     restart_from: verdict === "accept" ? null : (overrides.restart_from ?? "merge"),
     restart_rationale: verdict === "accept" ? null : (overrides.restart_rationale ?? "Resume after merge correction."),
-    skill_usage_summary: overrides.skill_usage_summary ?? [
-      {
-        scope: "spec",
-        required_skills: ["superpowers"],
-        applied_skills: ["superpowers"],
-        issues: [],
-      },
-    ],
+    skill_usage_summary: overrides.skill_usage_summary ?? [],
     readability_conclusion: overrides.readability_conclusion ?? "high",
     complexity_conclusion: overrides.complexity_conclusion ?? "low",
     complexity_summary: overrides.complexity_summary ?? "Readability high; complexity low based on execution complexity reports.",
@@ -911,6 +906,28 @@ test("dispatch validation enforces architecture-derived required skills", async 
   );
 });
 
+test("spec and plan require internal methodology markers to stay empty", () => {
+  assert.deepEqual(validateArtifact("spec", makeSpecArtifact()).applied_skills, []);
+  assert.deepEqual(validateArtifact("plan", makePlanArtifact()).applied_skills, []);
+
+  assert.throws(
+    () =>
+      validateArtifact("spec", {
+        ...makeSpecArtifact(),
+        applied_skills: ["superpowers"],
+      }),
+    /applied_skills must be \[\]/,
+  );
+  assert.throws(
+    () =>
+      validateArtifact("plan", {
+        ...makePlanArtifact(),
+        applied_skills: ["superpowers"],
+      }),
+    /applied_skills must be \[\]/,
+  );
+});
+
 test("execution report requires REPLAN_REQUIRED as the first blocker when present", () => {
   const report = {
     ...makeExecutionArtifact({
@@ -933,6 +950,36 @@ test("execution report requires REPLAN_REQUIRED as the first blocker when presen
   );
 });
 
+test("validation reports reject fix commands because Execution owns repairs", () => {
+  const report = makeValidationArtifact("GROUP-1", 1, {
+    commands_run: [
+      {
+        command: "eslint --fix",
+        type: "fix",
+        exit_code: 0,
+        output: "mutating validation command should be rejected",
+      },
+    ],
+  });
+
+  assert.throws(
+    () => validateArtifact("validation-report", report),
+    /commands_run\[0\]\.type/,
+  );
+});
+
+test("doc reports can request Execution-owned documentation repair", () => {
+  const report = {
+    version: "1.0",
+    status: "changes_required",
+    updated_files: ["README.md"],
+    summary: "README needs an Execution-owned update for the new behavior.",
+    notes: ["Doc is read-only and sends this path back to Execution."],
+  };
+
+  assert.deepEqual(validateArtifact("doc-report", report), report);
+});
+
 test("pipeline orchestrator defaults to a six-slot subagent pool", async () => {
   const repoRoot = await createRepoFixture();
   const orchestrator = new PipelineOrchestrator({
@@ -941,6 +988,33 @@ test("pipeline orchestrator defaults to a six-slot subagent pool", async () => {
   });
 
   assert.equal(orchestrator.maxConcurrentSubagents, 6);
+});
+
+test("default write authority reserves repo mutations for Execution workers", () => {
+  assert.equal(DEFAULT_ORCHESTRATOR_WRITE_AUTHORITY.canModifyRepoFilesDirectly, false);
+  assert.match(
+    DEFAULT_ORCHESTRATOR_WRITE_AUTHORITY.rule,
+    /orchestrator\/main agent must never modify code or repo files directly/,
+  );
+  assert.match(DEFAULT_ORCHESTRATOR_WRITE_AUTHORITY.rule, /Execution-stage worker subagents/);
+
+  const executionAuthority = DEFAULT_STAGE_WRITE_AUTHORITY.execution;
+  assert.equal(executionAuthority.repoFileMutationsAllowed, true);
+  assert.equal(executionAuthority.codeFileMutationsAllowed, true);
+  assert.equal(executionAuthority.mutationOwner, "execution-worker");
+
+  for (const [stage, authority] of Object.entries(DEFAULT_STAGE_WRITE_AUTHORITY)) {
+    const profile = loadStageCatalog(fixtureSourceRoot).resolveStageProfile(stage);
+    assert.deepEqual(profile.writeAuthority, authority, stage);
+
+    if (stage === "execution") {
+      continue;
+    }
+
+    assert.equal(authority.repoFileMutationsAllowed, false, stage);
+    assert.equal(authority.codeFileMutationsAllowed, false, stage);
+    assert.match(authority.repairRouting, /Execution/, stage);
+  }
 });
 
 test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => {
@@ -975,6 +1049,39 @@ test("default stage profiles pin GPT-5.5 xhigh priority subagents", async () => 
     assert.equal(profile.reasoningEffort, "xhigh", `grader-${graderId}`);
     assert.equal(profile.serviceTier, "priority", `grader-${graderId}`);
   }
+});
+
+test("stage docs document Execution-only file mutation authority", async () => {
+  const readFixture = (relativePath) =>
+    fs.readFile(path.resolve(fixtureSourceRoot, relativePath), "utf8");
+
+  const [
+    codexModel,
+    orchestratorPrompts,
+    executionPrompt,
+    validationPrompt,
+    qaPrompt,
+    docPrompt,
+  ] = await Promise.all([
+    readFixture("references/codex-execution-model.md"),
+    readFixture("references/orchestrator-prompts.md"),
+    readFixture("agents/execution.md"),
+    readFixture("agents/validation.md"),
+    readFixture("agents/qa.md"),
+    readFixture("agents/doc.md"),
+  ]);
+
+  assert.match(
+    codexModel,
+    /The orchestrator\/main agent must never modify code or repo files directly\./,
+  );
+  assert.match(orchestratorPrompts, /File\/code mutations are only allowed in Execution-stage worker subagents\./);
+  assert.match(executionPrompt, /only pipeline stage with repo file write authority/);
+  assert.match(validationPrompt, /Validation is read-only/);
+  assert.doesNotMatch(validationPrompt, /Fix-layer commands have write permission/);
+  assert.match(qaPrompt, /QA is read-only/);
+  assert.match(docPrompt, /Doc is read-only/);
+  assert.match(docPrompt, /changes_required/);
 });
 
 test("git commit formatter keeps conventional commits with gitmoji and Chinese text", async () => {
@@ -1100,6 +1207,29 @@ test("stage catalog exposes artifact templates for every stage profile", async (
   }
 });
 
+test("stage catalog treats methodology as pipeline-internal capability", async () => {
+  const catalog = loadStageCatalog(fixtureSourceRoot);
+
+  assert.deepEqual(catalog.resolveRequiredSkills("spec"), []);
+  assert.deepEqual(catalog.resolveRequiredSkills("plan"), []);
+  assert.deepEqual((await catalog.buildStageRequest("spec")).requiredSkills, []);
+  assert.deepEqual((await catalog.buildStageRequest("plan")).requiredSkills, []);
+
+  const workerGroup = {
+    group_id: "GROUP-UI",
+    required_skills: ["ce-frontend-design"],
+  };
+  const expectedSkillLabels = [
+    {
+      name: "ce-frontend-design",
+      source: "pipeline-internal-capability",
+    },
+  ];
+
+  assert.deepEqual(catalog.resolveRequiredSkills("execution", { workerGroup }), expectedSkillLabels);
+  assert.deepEqual(catalog.resolveRequiredSkills("review", { workerGroup }), expectedSkillLabels);
+});
+
 test("artifact templates materialize deterministic execution fields before validation", async () => {
   const repoRoot = await createRepoFixture();
   const proposalDir = await createProposalDir({
@@ -1172,14 +1302,7 @@ test("artifact templates fill fixed dimension labels but still require semantic 
         improvement_areas: [],
         restart_from: null,
         restart_rationale: null,
-        skill_usage_summary: [
-          {
-            scope: "spec",
-            required_skills: ["superpowers"],
-            applied_skills: ["superpowers"],
-            issues: [],
-          },
-        ],
+        skill_usage_summary: [],
         readability_conclusion: "high",
         complexity_conclusion: "low",
         complexity_summary: "Complexity reports show low complexity.",
@@ -1257,6 +1380,7 @@ test("OpenCode expert profiles use task invocation without Codex-only spawn fiel
     assert.equal(profile.agentType, undefined, stage);
     assert.equal(profile.serviceTier, undefined, stage);
     assert.equal(profile.forkContext, undefined, stage);
+    assert.deepEqual(profile.writeAuthority, DEFAULT_STAGE_WRITE_AUTHORITY[stage], stage);
     assert.ok(profile.promptFile.startsWith("agents/"), stage);
   }
 });

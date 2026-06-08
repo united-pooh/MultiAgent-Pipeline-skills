@@ -140,12 +140,12 @@ export function deterministicArtifactFields(
     case "spec":
       return {
         ...base,
-        applied_skills: ["superpowers"],
+        applied_skills: [],
       };
     case "plan":
       return {
         ...base,
-        applied_skills: ["superpowers"],
+        applied_skills: [],
         spec_ref: "spec.json",
       };
     case "architecture":

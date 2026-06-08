@@ -1,6 +1,5 @@
-import path from "node:path";
-
 import { getPrompt, listPrompts } from "./prompts.js";
+import { resolveMcpPaths } from "./paths.js";
 import { listResources, listResourceTemplates, readResource } from "./resources.js";
 import { RunStore } from "./run-store.js";
 import { callTool, listTools } from "./tools.js";
@@ -31,15 +30,13 @@ function isNotification(message) {
   return !Object.prototype.hasOwnProperty.call(message, "id");
 }
 
-export function createMcpProtocol({
-  repoRoot = process.cwd(),
-  skillRoot = path.resolve(repoRoot, "skills", "multi-agent-pipeline"),
-  clock = () => new Date(),
-} = {}) {
+export function createMcpProtocol(options = {}) {
+  const { clock = () => new Date() } = options;
+  const { repoRoot, skillRoot } = resolveMcpPaths(options);
   const store = new RunStore({ repoRoot, clock });
   const context = {
-    repoRoot: path.resolve(repoRoot),
-    skillRoot: path.resolve(skillRoot),
+    repoRoot,
+    skillRoot,
     store,
   };
 

@@ -310,30 +310,12 @@ function findValidationForIteration(state, iteration) {
   return null;
 }
 
-function buildSkillUsageSummary({ spec, plan, dispatch, groupStates, finalAssessment }) {
+function buildSkillUsageSummary({ dispatch, groupStates, finalAssessment }) {
   if (finalAssessment?.skill_usage_summary) {
     return finalAssessment.skill_usage_summary;
   }
 
   const summary = [];
-
-  if (spec) {
-    summary.push({
-      scope: "spec",
-      required_skills: ["superpowers"],
-      applied_skills: spec.applied_skills,
-      issues: skillIssues(["superpowers"], spec.applied_skills),
-    });
-  }
-
-  if (plan) {
-    summary.push({
-      scope: "plan",
-      required_skills: ["superpowers"],
-      applied_skills: plan.applied_skills,
-      issues: skillIssues(["superpowers"], plan.applied_skills),
-    });
-  }
 
   if (!dispatch) {
     return summary;

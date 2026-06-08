@@ -1,8 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-
-import { validateArtifact } from "../../skills/multi-agent-pipeline/src/index.js";
+import { pathToFileURL } from "node:url";
 
 function jsonSchema(properties, required = []) {
   return {
@@ -152,7 +151,7 @@ export const TOOL_DEFINITIONS = [
   {
     name: "pipeline.install_codex_adapter",
     title: "Install Codex Adapter",
-    description: "Report or sync the thin Codex adapter into ~/.codex/skills/multi-agent-pipeline.",
+    description: "Report or sync the thin Codex adapter into the local Codex adapter directory.",
     inputSchema: jsonSchema({
       apply: { type: "boolean" },
       destination: { type: "string" },
@@ -187,6 +186,17 @@ async function copyTree(sourceDir, targetDir) {
   }
 }
 
+const validationModuleCache = new Map();
+
+async function loadValidationModule(skillRoot) {
+  const moduleUrl = pathToFileURL(path.join(skillRoot, "src", "index.js")).href;
+  if (!validationModuleCache.has(moduleUrl)) {
+    validationModuleCache.set(moduleUrl, import(moduleUrl));
+  }
+
+  return validationModuleCache.get(moduleUrl);
+}
+
 export async function callTool(name, args = {}, context) {
   const { store, repoRoot, skillRoot } = context;
 
@@ -205,11 +215,13 @@ export async function callTool(name, args = {}, context) {
       return toToolResult(await store.submitHumanInput(args));
     case "pipeline.run_stage":
       return toToolResult(await store.recordStage(args));
-    case "pipeline.validate_artifact":
+    case "pipeline.validate_artifact": {
+      const { validateArtifact } = await loadValidationModule(skillRoot);
       return toToolResult({
         artifactType: args.artifactType,
         artifact: validateArtifact(args.artifactType, args.artifact, args.context ?? {}),
       });
+    }
     case "pipeline.inspect_workspace":
       return toToolResult(await store.inspectWorkspace());
     case "pipeline.export_summary":

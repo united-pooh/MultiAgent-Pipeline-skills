@@ -27,6 +27,8 @@ blanks in the returned artifact.
 
 - Do not use execution reports, validation reports, merge reports, logs, tool traces, retry history, or agent behavior.
 - Judge only the final output file contents.
+- This stage is read-only. Do not edit files; failing rubric nodes become
+  feedback for an Execution retry.
 - Score each node with `raw_score: 1` when the final output files satisfy the node, otherwise `raw_score: 0`.
 - Evidence must cite a path from `final-output-files.json`.
 - For passing nodes, set `failure_reason` and `suggestion` to `null`.

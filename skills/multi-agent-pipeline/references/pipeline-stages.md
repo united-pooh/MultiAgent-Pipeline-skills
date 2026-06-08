@@ -30,9 +30,22 @@ Dispatch waves still express dependency readiness and the maximum fanout for
 new Execution groups. They are not barriers for downstream review stages once a
 group has produced a merged proposal.
 
+## Global Write Authority
+
+- The orchestrator/main agent must never modify code or repo files directly.
+- The orchestrator may read code, schedule stages, write MCP run bookkeeping,
+  persist canonical pipeline artifacts, validate outputs, aggregate feedback,
+  and report status.
+- File/code mutations are only allowed in Execution-stage worker subagents.
+- Validation, QA, Doc, Tree Rubrics, Tree Grading, Review, Final Assessment,
+  and every other non-Execution stage are read-only. They must record failures
+  or feedback and send the repair request back to Execution.
+
 ## 0. Brainstorming
 
 Brainstorming is orchestrator-local. Do not spawn a subagent.
+Use the repo-owned internal methodology at
+`pipeline://methodologies/brainstorming`.
 
 Goal:
 
@@ -50,6 +63,9 @@ execution, record that request as the approved design and continue.
 
 Spawn the Spec subagent with `agents/spec.md` and `references/contracts.md`.
 Pass `design.md` inline.
+Provide the internal methodology context from
+`pipeline://methodologies/brainstorming` and
+`pipeline://methodologies/superpowers`, or the matching MCP methodology prompts.
 
 Outputs:
 
@@ -60,14 +76,15 @@ Rules:
 
 - Record explicit assumptions instead of stopping on every ambiguity.
 - Keep scope tight and acceptance criteria testable.
-- Record `applied_skills: ["superpowers"]`.
-- Attach `superpowers` and restrict it to brainstorming/planning discipline.
-- Do not allow build, TDD, commit, or finish-branch behaviors from
-  `superpowers`.
+- Record `applied_skills: []`.
+- Do not rely on host methodology packages.
+- Use only brainstorming/specification discipline in this stage.
 
 ## 2. Plan
 
 Spawn the Plan subagent with `spec.json`.
+Provide the internal methodology context from
+`pipeline://methodologies/superpowers`, or the matching MCP methodology prompt.
 
 Output:
 
@@ -78,8 +95,8 @@ Rules:
 - Break work into phases, task order, dependencies, and risks.
 - Keep tasks implementation-sized.
 - Prefer task boundaries that preserve future worker independence.
-- Record `applied_skills: ["superpowers"]`.
-- Attach `superpowers` for planning discipline only.
+- Record `applied_skills: []`.
+- Do not rely on host methodology packages.
 
 ## 3. Architecture
 
@@ -136,8 +153,10 @@ Rules:
   complete the task.
 - The worker is not alone in the codebase and must not revert unrelated edits.
 - Return a group-scoped `execution-report.json`.
-- If `required_skills` contains `ce-frontend-design`, attach that skill and
-  require `frontend_design_summary`.
+- If `required_skills` contains `ce-frontend-design`, apply the internal
+  frontend-design capability guidance from
+  `pipeline://methodologies/frontend-design`, record the label in
+  `applied_skills`, and require `frontend_design_summary`.
 - A same-group retry may add related local goals only inside the existing group
   ownership or adjacent tests/docs.
 - If retry feedback requires unowned files, cross-group ownership changes, or a
@@ -161,12 +180,16 @@ Rules:
 
 ## 6. Merge
 
-Merge is orchestrator-local. Do not spawn a subagent.
+Merge is orchestrator-local for decisions, validation, and bookkeeping. Do not
+spawn a subagent.
 
 Rules:
 
-- Merge each proposal into the main workspace using `{base_ref, proposal_ref,
-  current main workspace}`.
+- Do not directly edit code or repo files during Merge.
+- Compare each Execution proposal against `{base_ref, proposal_ref, current
+  main workspace}` and record the integration decision.
+- If integration requires file changes outside an existing Execution proposal,
+  route the group through an Execution sync pass or re-dispatch.
 - Write one `merge-report.json` per group execution pass.
 - Use conservative three-way merge semantics.
 - `merged`: merge succeeded.
@@ -184,13 +207,13 @@ Rules:
 
 - Spawn a Validation `worker` with the group's execution, complexity, and merge
   reports plus repo root.
-- Detect language and run the fix/check layers in `agents/validation.md`.
+- Detect language and run the read-only check layer in `agents/validation.md`.
 - Write `validation-report.json`.
 - Failed or errored validation routes the group back to Execution as a
   same-group retry unless the required fix needs re-dispatch.
 - Passed or skipped validation continues to Tree Rubrics.
-- Any fix-layer file edits become part of the current merged main-workspace
-  result before Tree Rubrics.
+- Validation must not run fix-layer commands or edit files. Execution retry
+  owns all repair work.
 - A group does not wait for other groups in its execution wave before entering
   Validation when a pool slot is free.
 
@@ -258,14 +281,18 @@ worker.
 
 Rules:
 
-- Update only docs that actually changed.
+- Doc is read-only and audits only the documentation that should change.
 - Update `CHANGELOG.md` when the repository has one or the task requires release
-  notes.
+  notes by sending the required documentation update back to Execution.
 - Return `doc-report.json`.
-- The orchestrator reviews and integrates doc changes before final assessment.
+- If docs are missing or stale, return `status = "changes_required"` with the
+  affected docs in `updated_files` and notes explaining the required Execution
+  repair.
+- The orchestrator reviews doc feedback before final assessment.
 - If `gitPolicy` is enabled, the orchestrator may commit the integrated
-  `updated_files` with a `docs(pipeline): :memo: ...` Chinese Conventional
-  Commit message. Push is controlled by the Doc phase policy.
+  Execution-produced documentation files with a `docs(pipeline): :memo: ...`
+  Chinese Conventional Commit message. Push is controlled by the Doc phase
+  policy.
 
 ## 12. Final Assessment
 

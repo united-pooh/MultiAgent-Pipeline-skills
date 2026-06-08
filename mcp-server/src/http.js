@@ -11,25 +11,29 @@ async function readBody(request) {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-function writeJson(response, statusCode, value) {
-  response.writeHead(statusCode, {
+function responseHeaders(corsOrigin) {
+  return {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Method, Mcp-Name",
-    "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
-  });
+    ...(corsOrigin
+      ? {
+          "Access-Control-Allow-Origin": corsOrigin,
+          "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Method, Mcp-Name",
+          "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
+        }
+      : {}),
+  };
+}
+
+function writeJson(response, statusCode, value, corsOrigin) {
+  response.writeHead(statusCode, responseHeaders(corsOrigin));
   response.end(JSON.stringify(value));
 }
 
-export function createHttpServer({ repoRoot = process.cwd(), skillRoot, clock } = {}) {
+export function createHttpServer({ repoRoot, skillRoot, clock, corsOrigin } = {}) {
   const protocol = createMcpProtocol({ repoRoot, skillRoot, clock });
   const server = http.createServer(async (request, response) => {
     if (request.method === "OPTIONS") {
-      response.writeHead(204, {
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Headers": "Content-Type, Accept, Mcp-Method, Mcp-Name",
-        "Access-Control-Allow-Methods": "POST, OPTIONS, GET",
-      });
+      response.writeHead(204, responseHeaders(corsOrigin));
       response.end();
       return;
     }
@@ -38,14 +42,14 @@ export function createHttpServer({ repoRoot = process.cwd(), skillRoot, clock } 
       writeJson(response, 200, {
         status: "ok",
         server: "multi-agent-pipeline-mcp",
-      });
+      }, corsOrigin);
       return;
     }
 
     if (request.method !== "POST" || request.url !== "/mcp") {
       writeJson(response, 404, {
         error: "not_found",
-      });
+      }, corsOrigin);
       return;
     }
 
@@ -54,11 +58,11 @@ export function createHttpServer({ repoRoot = process.cwd(), skillRoot, clock } 
       const message = JSON.parse(body);
       const result = await protocol.handleMessage(message);
       if (result === null) {
-        writeJson(response, 202, {});
+        writeJson(response, 202, {}, corsOrigin);
         return;
       }
 
-      writeJson(response, 200, result);
+      writeJson(response, 200, result, corsOrigin);
     } catch (error) {
       writeJson(response, 400, {
         jsonrpc: "2.0",
@@ -67,7 +71,7 @@ export function createHttpServer({ repoRoot = process.cwd(), skillRoot, clock } 
           code: -32700,
           message: error.message,
         },
-      });
+      }, corsOrigin);
     }
   });
 

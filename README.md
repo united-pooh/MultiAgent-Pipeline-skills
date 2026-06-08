@@ -21,12 +21,23 @@ Core Runtime + MCP Server + Thin Codex Adapter
 | `skills/multi-agent-pipeline/src/runtime/` | Pipeline contracts, artifact store, merge engine, validation, Tree Rubrics, Tree Grading, QA, git automation |
 | `skills/multi-agent-pipeline/SKILL.md` | Thin Codex adapter that points Codex at the MCP server instead of re-orchestrating the pipeline from skill text |
 
+## Write Authority Boundary
+
+The main agent/orchestrator must never modify code or repo files directly. It
+may read code, schedule stages, write MCP run bookkeeping under `.pipeline-runs/`,
+validate artifacts, aggregate feedback, and report status.
+
+File/code mutations are only allowed in Execution-stage worker subagents.
+Validation, QA, Doc, Tree Rubrics, Tree Grading, Review, Final Assessment, and
+other non-Execution stages are read-only; they send failures, required changes,
+and feedback back to Execution for repair.
+
 ## Run The MCP Server
 
 ### stdio
 
 ```bash
-cd /Users/united_pooh/Downloads/multi-agent-pipeline
+cd /path/to/multi-agent-pipeline
 node mcp-server/src/cli.js --transport stdio --repo-root "$PWD"
 ```
 
@@ -36,8 +47,8 @@ stderr, so stdout remains safe for MCP protocol frames.
 ### Streamable HTTP-Style Endpoint
 
 ```bash
-cd /Users/united_pooh/Downloads/multi-agent-pipeline
-node mcp-server/src/cli.js --transport http --port 3333 --repo-root "$PWD"
+cd /path/to/multi-agent-pipeline
+node mcp-server/src/cli.js --transport http --host 127.0.0.1 --port 3333 --repo-root "$PWD"
 ```
 
 The HTTP server exposes:
@@ -50,6 +61,34 @@ GET  /healthz
 `POST /mcp` accepts JSON-RPC requests and returns JSON responses. It is shaped
 for Streamable HTTP clients while keeping request-scoped JSON responses for
 deterministic local smoke tests.
+
+### Portable Defaults
+
+The server is safe to run from a fresh clone without machine-specific paths:
+
+- `repoRoot` defaults to the current working directory.
+- `skillRoot` resolves in this order:
+  1. `--skill-root`
+  2. `MULTI_AGENT_PIPELINE_SKILL_ROOT`
+  3. `<repoRoot>/skills/multi-agent-pipeline`
+  4. bundled repository/package resources
+- `MULTI_AGENT_PIPELINE_REPO_ROOT` can set the default repo root when
+  `--repo-root` is omitted.
+- HTTP binds to `127.0.0.1` by default. Use `--host 0.0.0.0` only when you
+  intentionally want to expose it beyond localhost.
+- Browser CORS headers are disabled by default. Set
+  `--cors-origin <origin>` or `MULTI_AGENT_PIPELINE_CORS_ORIGIN` only for a
+  trusted local browser client.
+
+For long-running local deployments, set `--repo-root` explicitly so reconnects
+and background supervisors always write `.pipeline-runs/` to the intended
+checkout.
+
+Register the HTTP endpoint with Codex CLI:
+
+```bash
+codex mcp add multi-agent-pipeline --url http://127.0.0.1:3333/mcp
+```
 
 ## MCP Surface
 
@@ -181,11 +220,13 @@ git diff --check
 Sync the thin Codex adapter after repo changes:
 
 ```bash
+export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+
 rsync -a --delete \
-  /Users/united_pooh/Downloads/multi-agent-pipeline/skills/multi-agent-pipeline/ \
-  /Users/united_pooh/.codex/skills/multi-agent-pipeline/
+  "$PWD/skills/multi-agent-pipeline/" \
+  "$CODEX_HOME/skills/multi-agent-pipeline/"
 
 diff -qr \
-  /Users/united_pooh/.codex/skills/multi-agent-pipeline \
-  /Users/united_pooh/Downloads/multi-agent-pipeline/skills/multi-agent-pipeline
+  "$CODEX_HOME/skills/multi-agent-pipeline" \
+  "$PWD/skills/multi-agent-pipeline"
 ```

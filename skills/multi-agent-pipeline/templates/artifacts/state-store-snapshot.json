@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "active_path": {
+    "path_id": "PATH-main",
+    "current_stage": "execution"
+  },
+  "candidate_pool": [
+    {
+      "candidate_id": "CAND-001",
+      "status": "active"
+    }
+  ],
+  "evidence_links": [
+    {
+      "evidence_id": "EVID-001",
+      "source": "SRC-001",
+      "target": "CAND-001"
+    }
+  ],
+  "failed_branches": [],
+  "rollback_boundaries": [
+    {
+      "boundary_id": "RB-001",
+      "restore_ref": "git:HEAD"
+    }
+  ],
+  "memory_channel_checks": [
+    {
+      "channel": "local-artifacts",
+      "status": "passed"
+    }
+  ]
+}

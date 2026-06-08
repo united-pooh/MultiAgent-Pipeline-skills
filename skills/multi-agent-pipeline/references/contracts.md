@@ -41,7 +41,7 @@ Consumed by: **Plan Agent**, **Architecture Agent**, **Dispatch Agent**, **Execu
 ```json
 {
   "version": "1.0",
-  "applied_skills": ["superpowers"],
+  "applied_skills": [],
   "feature_name": "string — concise feature title",
   "objective": "string — one-paragraph goal description",
   "requirements": [
@@ -70,7 +70,8 @@ Consumed by: **Plan Agent**, **Architecture Agent**, **Dispatch Agent**, **Execu
 
 ### Field Rules
 
-- `applied_skills`: Must include `superpowers` exactly once for this pipeline.
+- `applied_skills`: Must be an empty array. Spec uses MCP internal
+  methodology resources/prompts, not host skill packages.
 - `id`: Sequential, prefixed with `REQ-`. Start from `REQ-001`.
 - `priority`: Every requirement must have one. Default to `must-have` if unclear.
 - `acceptance_criteria`: At least one per requirement. Must be objectively verifiable.
@@ -141,7 +142,7 @@ Consumed by: **Architecture Agent**, **Dispatch Agent**, **Execution Agent**, **
 ```json
 {
   "version": "1.0",
-  "applied_skills": ["superpowers"],
+  "applied_skills": [],
   "spec_ref": "spec.json",
   "phases": [
     {
@@ -167,7 +168,8 @@ Consumed by: **Architecture Agent**, **Dispatch Agent**, **Execution Agent**, **
 
 ### Field Rules
 
-- `applied_skills`: Must include `superpowers` exactly once for this pipeline.
+- `applied_skills`: Must be an empty array. Plan uses MCP internal
+  methodology resources/prompts, not host skill packages.
 - `id`: Tasks use `TASK-NNN`, phases use `PHASE-N`.
 - `depends_on`: References other task IDs. Empty array if no dependencies.
 - `execution_order`: Flattened topological sort of all tasks respecting dependencies.
@@ -264,7 +266,10 @@ Consumed by: **Execution Agent**, **QA Agent**, **Final Assessment Agent**, **Or
 
 - `worker_groups`: Each group contains one or more tasks from `plan.json` and the files those tasks own, derived from `architecture.json.proposed_changes`. No file may appear in more than one group's `owned_files` within the same execution wave.
 - `depends_on_groups`: References other group IDs. A group can only begin execution after all groups it depends on have completed. Empty array when no inter-group dependency exists.
-- `required_skills`: Deterministic union of `concerns` for the files owned by that group. Map `frontend_design` to `ce-frontend-design`. Use an empty array when no routed skill is required.
+- `required_skills`: Deterministic union of pipeline-internal capability labels
+  for the files owned by that group. Map `frontend_design` to
+  `ce-frontend-design`. Use an empty array when no routed capability is
+  required. These labels do not imply host skill packages.
 - `execution_waves`: Groups with no unresolved `depends_on_groups` launch Execution in the same wave. Execution launch waves are sequential, but downstream Validation, Tree Rubrics, Tree Grading, and QA are per-group and may start early as each group finishes Execution. At least one wave must be produced, and each wave must list 1 to 6 groups.
 - `integration_strategy`: Must always be `{ "merge_mode": "three_way", "conflict_policy": "pause_for_human", "base_strategy": "wave_start_snapshot" }` in this pipeline version.
 - `rationale`: A plain-language explanation of why the tasks were grouped this way and what tradeoffs were made.
@@ -319,7 +324,10 @@ Consumed by: **Complexity Hook**, **Merge Stage**, **Validation Agent**, **Revie
 - `iteration`: Starts at 1 and matches the current execution/merge/review loop.
 - `base_ref`: Reference to the wave-start snapshot used by the orchestrator for three-way merge.
 - `proposal_ref`: Reference to the worker proposal the orchestrator will merge. It may point to an uploaded patch, fork workspace handle, or equivalent proposal artifact.
-- `applied_skills`: Include `ce-frontend-design` when `dispatch.json.worker_groups[].required_skills` includes it. Otherwise use an empty array.
+- `applied_skills`: Include `ce-frontend-design` when
+  `dispatch.json.worker_groups[].required_skills` includes it and the internal
+  frontend-design capability guidance was applied. Otherwise use an empty
+  array.
 - `status`: `implemented` means the proposal is ready for merge. `blocked` means the worker cannot proceed.
 - `changed_files`: Must reflect actual touched files.
 - `requirements_covered`: Reference requirement IDs from `spec.json`.
@@ -705,7 +713,8 @@ Consumed by: **Orchestrator**
 
 ### Field Rules
 
-- `applied_skills`: Include `ce-frontend-design` when the reviewed group required that skill. Otherwise use an empty array.
+- `applied_skills`: Include `ce-frontend-design` when the reviewed group
+  required that internal capability label. Otherwise use an empty array.
 - `pre_results`: Exactly 8 entries, one per rubric dimension, in rubric order.
 - `suggestion`: Required for every `fail` and `warning`. Must be `null` for `pass`.
 - `frontend_design_assessment`: Must be non-null when `applied_skills` includes `ce-frontend-design`. Must be `null` otherwise.
@@ -776,7 +785,7 @@ Consumed by: **Orchestrator**, **Review Agent**, **QA Agent**, **Final Assessmen
   "commands_run": [
     {
       "command": "string — exact command run",
-      "type": "fix | check",
+      "type": "check",
       "exit_code": 0,
       "output": "string — full stdout/stderr"
     }
@@ -801,8 +810,8 @@ Consumed by: **Orchestrator**, **Review Agent**, **QA Agent**, **Final Assessmen
 - `test_summary`: Aggregate counts across all test commands. Set to zeroes if no test commands were run.
 - `blocking_failures`: Empty array when `status` is `passed`, `skipped`, or `error`. List individual failing test names or diagnostics when `status` is `failed`.
 - `detected_language`: The language detected from repo root marker files. Set to `unknown` when no marker file is found.
-- `status`: `passed` when all commands exit 0; `failed` when any check command exits non-zero; `error` when a fix command fails to run or compilation prevents test execution; `skipped` when `detected_language` is `unknown` — orchestrator treats `skipped` as a soft pass and proceeds to Tree Grading.
-- `commands_run[].type`: `fix` for commands that may write files (formatters, import sorters); `check` for read-only commands (tests, type checkers, linters that only report).
+- `status`: `passed` when all commands exit 0; `failed` when any check command exits non-zero; `error` when a check command cannot run or compilation prevents test execution; `skipped` when `detected_language` is `unknown` — orchestrator treats `skipped` as a soft pass and proceeds to Tree Grading.
+- `commands_run[].type`: Must be `check`. Validation is read-only; formatting, import sorting, auto-fix, and other repo-file mutations belong to an Execution retry.
 
 ---
 
@@ -860,9 +869,9 @@ Consumed by: **Final Assessment Agent**, **Orchestrator**
 ```json
 {
   "version": "1.0",
-  "status": "updated | no_changes_needed",
-  "updated_files": ["string — repo-relative documentation paths"],
-  "summary": "string — what changed for users or maintainers",
+  "status": "updated | no_changes_needed | changes_required",
+  "updated_files": ["string — repo-relative documentation paths updated by a legacy proposal or requiring Execution repair"],
+  "summary": "string — what changed or what documentation repair is required",
   "notes": [
     "string — rationale or follow-up documentation gaps"
   ]
@@ -871,9 +880,15 @@ Consumed by: **Final Assessment Agent**, **Orchestrator**
 
 ### Field Rules
 
-- `updated_files`: Empty array only when `status` is `no_changes_needed`.
+- `updated` is a legacy compatibility status for older doc-worker proposal runs.
+  Current Doc agents are read-only and should use `changes_required` when docs
+  need file edits.
+- `updated_files`: Empty array only when `status` is `no_changes_needed`. When
+  `status` is `changes_required`, list the documentation files Execution should
+  repair.
 - `summary`: Required even when no docs changed.
-- `notes`: Use for deferred docs work or style constraints discovered during editing.
+- `notes`: Use for deferred docs work, style constraints discovered during
+  auditing, or precise Execution repair guidance.
 
 ---
 
@@ -906,8 +921,8 @@ Consumed by: **Orchestrator**
   "skill_usage_summary": [
     {
       "scope": "spec | plan | GROUP-1/execution | GROUP-1/grading",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": [
         "string — missing, extra, or misapplied skill usage"
       ]
@@ -929,7 +944,9 @@ Consumed by: **Orchestrator**
 - `improvement_areas`: May be empty on a clean accept. On `accept`, keep only non-blocking recommendations. On `reject`, include every gap that materially contributed to rejection or must be addressed on restart.
 - `restart_from`: Must be `null` when `verdict` is `accept`. Must be one of `spec`, `plan`, `architecture`, `dispatch`, `merge`, or `execution` when `verdict` is `reject`.
 - `restart_rationale`: Must be `null` when `verdict` is `accept`. Must be non-null when `verdict` is `reject` and explain why the chosen restart stage is the earliest correct recovery point.
-- `skill_usage_summary`: Include at least Spec, Plan, and every worker-group stage that required a routed skill. Use `issues = []` when usage matched the requirement.
+- `skill_usage_summary`: Include at least Spec, Plan, and every worker-group
+  stage that required a routed capability label. Use `issues = []` when usage
+  matched the requirement.
 - `readability_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final grading evidence.
 - `complexity_conclusion`: Must be exactly `high` or `low`, based on all `complexity-report.json` artifacts and final grading evidence.
 - `complexity_summary`: Required. Cite the strongest complexity evidence and state whether readability/complexity affects delivery confidence.
@@ -952,8 +969,8 @@ Consumed by: **Orchestrator**, **Humans**
   "skill_usage_summary": [
     {
       "scope": "spec | plan | GROUP-1/execution | GROUP-1/grading",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     }
   ],
@@ -1062,3 +1079,479 @@ Consumed by: **Codex host UI** or any bridge that can map pipeline progress to a
 - `scope`: Must remain stable enough for a host to deduplicate repeated events.
 - `duration_ms`: Advisory display duration. The host may clamp or ignore it.
 - `directive`: Mirrors the structured fields for directive-capable hosts. The structured JSON remains canonical.
+
+---
+
+## research-harness-state.json
+
+Produced by: **Research Harness**
+Consumed by: **Planning, Execution, Validation, Review, Final Assessment**
+
+Tracks the generated research report, source inventory, candidate decisions,
+evidence links, scoring rubric, and output checks for an agent engineering
+research pass.
+
+```json
+{
+  "version": "1.0",
+  "report_path": "research-reports/2026-W23/agent-engineering-landing.md",
+  "generated_for_date": "2026-06-08",
+  "sources_seen": [
+    {
+      "source_id": "SRC-001",
+      "source_type": "paper",
+      "title": "Agent engineering benchmark notes",
+      "locator": "https://example.com/agent-engineering"
+    }
+  ],
+  "candidate_index": [
+    {
+      "candidate_id": "CAND-001",
+      "title": "Runtime artifact validation",
+      "status": "selected"
+    }
+  ],
+  "evidence_map": [
+    {
+      "candidate_id": "CAND-001",
+      "source_ids": ["SRC-001"],
+      "summary": "The landing plan needs artifact contracts before orchestration can replay runs."
+    }
+  ],
+  "rubric": {
+    "criteria": ["contract coverage", "fixture quality"],
+    "minimum_evidence_count": 1
+  },
+  "output_validation": {
+    "status": "passed",
+    "checks": ["all selected candidates have evidence"]
+  }
+}
+```
+
+### Field Rules
+
+- `version`, `report_path`, and `generated_for_date` are required strings.
+- `sources_seen`: Non-empty array; each item requires `source_id`, `source_type`, `title`, and `locator` strings.
+- `candidate_index`: Non-empty array; each item requires `candidate_id`, `title`, and `status`.
+- `candidate_index[].status`: Must be `selected`, `queued`, or `rejected`.
+- `evidence_map`: Non-empty array; each item requires `candidate_id`, non-empty `source_ids`, and `summary`.
+- `rubric.criteria`: Non-empty string array.
+- `rubric.minimum_evidence_count`: Integer greater than or equal to 0.
+- `output_validation.status`: Must be `passed`, `warning`, or `failed`.
+- `output_validation.checks`: Non-empty string array.
+
+---
+
+## context-manifest.json
+
+Produced by: **Context Assembly Agent**
+Consumed by: **Execution, Review, QA, Governance**
+
+Declares the context blocks supplied to an agent, their cache and approval
+behavior, and a compact prompt diff.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "compiled_at": "2026-06-08T08:00:00Z",
+  "blocks": [
+    {
+      "id": "system-contracts",
+      "version": "1.0.0",
+      "source": "references/contracts.md",
+      "priority": 10,
+      "tenant_scope": "local",
+      "cacheable": true,
+      "evictable": false,
+      "requires_approval": false,
+      "hash": "sha256:context-contracts"
+    }
+  ],
+  "prompt_diff": {
+    "summary": "Added runtime artifact validators for the landing plan.",
+    "added_blocks": ["system-contracts"],
+    "removed_blocks": []
+  }
+}
+```
+
+### Field Rules
+
+- `version`, `task_id`, and `compiled_at` are required strings.
+- `blocks`: Non-empty array.
+- `blocks[].id`, `blocks[].version`, `blocks[].source`, `blocks[].tenant_scope`, and `blocks[].hash`: Required strings.
+- `blocks[].priority`: Integer greater than or equal to 0.
+- `blocks[].cacheable`, `blocks[].evictable`, and `blocks[].requires_approval`: Required booleans.
+- `prompt_diff.summary`: Required string.
+- `prompt_diff.added_blocks` and `prompt_diff.removed_blocks`: Required string arrays.
+
+---
+
+## agent-trace.json
+
+Produced by: **Any Agent**
+Consumed by: **Review, Governance, Final Assessment**
+
+Records a compact, auditable trace of visible agent events and the stage
+outcome.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "started_at": "2026-06-08T00:00:00.000Z",
+  "events": [
+    {
+      "type": "message",
+      "at": "2026-06-08T00:00:10.000Z",
+      "summary": "Execution worker received the runtime artifact validation task."
+    }
+  ],
+  "summary": {
+    "status": "completed",
+    "outcome": "All requested artifact types were validated with fixture coverage."
+  }
+}
+```
+
+### Field Rules
+
+- `version`, `task_id`, and `started_at` are required strings.
+- `events`: Non-empty array.
+- `events[].type`: Must be `message`, `tool_call`, `tool_result`, `file_diff`, `validation`, `retry`, `failure`, or `cost`.
+- `events[].at` and `events[].summary`: Required strings.
+- `summary.status`: Must be `completed`, `blocked`, or `failed`.
+- `summary.outcome`: Required string.
+
+---
+
+## state-store-snapshot.json
+
+Produced by: **State Store**
+Consumed by: **Resume, Validation, Governance**
+
+Captures the active path, candidate pool, evidence links, rollback boundaries,
+and memory channel checks needed for deterministic resume and audit.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "active_path": {
+    "path_id": "PATH-main",
+    "current_stage": "execution"
+  },
+  "candidate_pool": [
+    {
+      "candidate_id": "CAND-001",
+      "status": "active"
+    }
+  ],
+  "evidence_links": [
+    {
+      "evidence_id": "EVID-001",
+      "source": "SRC-001",
+      "target": "CAND-001"
+    }
+  ],
+  "failed_branches": [],
+  "rollback_boundaries": [
+    {
+      "boundary_id": "RB-001",
+      "restore_ref": "git:HEAD"
+    }
+  ],
+  "memory_channel_checks": [
+    {
+      "channel": "local-artifacts",
+      "status": "passed"
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- `version` and `task_id` are required strings.
+- `active_path.path_id` and `active_path.current_stage`: Required strings.
+- `candidate_pool`: Non-empty array.
+- `candidate_pool[].candidate_id`: Required string.
+- `candidate_pool[].status`: Must be `active`, `parked`, or `rejected`.
+- `evidence_links`: Required array; each item requires `evidence_id`, `source`, and `target` strings.
+- `failed_branches`: Required array; each item requires `branch_id` and `reason` strings.
+- `rollback_boundaries`: Non-empty array; each item requires `boundary_id` and `restore_ref` strings.
+- `memory_channel_checks`: Non-empty array.
+- `memory_channel_checks[].status`: Must be `passed`, `warning`, or `failed`.
+
+---
+
+## cache-observability-report.json
+
+Produced by: **Cache Observer**
+Consumed by: **Performance Review, Governance, Final Assessment**
+
+Summarizes prompt component cache policy, stable prefix metrics, provider token
+metrics, and cache findings for one task.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "generated_at": "2026-06-08T08:00:00Z",
+  "prompt_components": [
+    {
+      "component_id": "stable-contract-prefix",
+      "role": "system",
+      "hash": "sha256:stable-prefix",
+      "cache_policy": "stable"
+    }
+  ],
+  "stable_prefix": {
+    "hash": "sha256:stable-prefix",
+    "token_count": 1200
+  },
+  "provider_metrics": {
+    "provider": "openai",
+    "prompt_tokens": 1800,
+    "cached_tokens": 1200
+  },
+  "findings": [
+    {
+      "severity": "info",
+      "summary": "Stable prompt prefix was reused for the execution stage."
+    }
+  ]
+}
+```
+
+### Field Rules
+
+- `version`, `task_id`, and `generated_at` are required strings.
+- `prompt_components`: Non-empty array.
+- `prompt_components[].component_id`, `prompt_components[].role`, and `prompt_components[].hash`: Required strings.
+- `prompt_components[].cache_policy`: Must be `stable`, `volatile`, or `bypass`.
+- `stable_prefix.hash`: Required string.
+- `stable_prefix.token_count`: Integer greater than or equal to 0.
+- `provider_metrics.provider`: Required string.
+- `provider_metrics.prompt_tokens` and `provider_metrics.cached_tokens`: Integers greater than or equal to 0.
+- `findings`: Required array.
+- `findings[].severity`: Must be `info`, `warning`, or `error`.
+- `findings[].summary`: Required string.
+
+---
+
+## governance-report.json
+
+Produced by: **Governance Agent**
+Consumed by: **Orchestrator, Final Assessment, Human Reviewer**
+
+Audits source trust, quarantined context, approval gates, tenant scope, memory
+injection checks, and conclusions for a task.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "source_graph": [
+    {
+      "node_id": "SRC-001",
+      "source": "references/contracts.md",
+      "trust_level": "trusted"
+    }
+  ],
+  "quarantined_items": [],
+  "approval_gates": [
+    {
+      "gate_id": "GATE-runtime-artifacts",
+      "status": "approved"
+    }
+  ],
+  "tenant_scope": "local",
+  "memory_injection_checks": [
+    {
+      "check_id": "MEM-001",
+      "status": "passed"
+    }
+  ],
+  "conclusions": ["No quarantined context was injected into the runtime artifact fixtures."]
+}
+```
+
+### Field Rules
+
+- `version` and `task_id` are required strings.
+- `source_graph`: Non-empty array.
+- `source_graph[].node_id` and `source_graph[].source`: Required strings.
+- `source_graph[].trust_level`: Must be `trusted`, `untrusted`, or `quarantined`.
+- `quarantined_items`: Required array; each item requires `item_id` and `reason` strings.
+- `approval_gates`: Non-empty array.
+- `approval_gates[].gate_id`: Required string.
+- `approval_gates[].status`: Must be `approved`, `pending`, or `rejected`.
+- `tenant_scope`: Required string.
+- `memory_injection_checks`: Non-empty array.
+- `memory_injection_checks[].check_id`: Required string.
+- `memory_injection_checks[].status`: Must be `passed`, `warning`, or `failed`.
+- `conclusions`: Non-empty string array.
+
+---
+
+## protocol-dag.json
+
+Produced by: **Protocol Planner**
+Consumed by: **Dispatch, Execution, Validation, Governance**
+
+Defines the protocol nodes and edges, a single-agent orchestration anchor,
+state machine metadata, and acceptance criteria.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "single_agent_anchor": {
+    "role": "orchestrator",
+    "responsibilities": ["own stage ordering", "record durable artifacts"]
+  },
+  "nodes": [
+    {
+      "id": "research",
+      "type": "stage",
+      "label": "Research harness"
+    },
+    {
+      "id": "execution",
+      "type": "stage",
+      "label": "Execution worker"
+    }
+  ],
+  "edges": [
+    {
+      "from": "research",
+      "to": "execution"
+    }
+  ],
+  "state_machine": {
+    "states": ["research", "execution", "validation"],
+    "initial_state": "research"
+  },
+  "acceptance": {
+    "criteria": ["every edge references known nodes", "initial state is declared"]
+  }
+}
+```
+
+### Field Rules
+
+- `version` and `task_id` are required strings.
+- `single_agent_anchor.role`: Required string.
+- `single_agent_anchor.responsibilities`: Non-empty string array.
+- `nodes`: Non-empty array.
+- `nodes[].id`, `nodes[].type`, and `nodes[].label`: Required strings.
+- `nodes[].id`: Must be unique.
+- `edges`: Required array.
+- `edges[].from` and `edges[].to`: Required strings and must reference known node ids.
+- `state_machine.states`: Non-empty string array.
+- `state_machine.initial_state`: Required string and must be listed in `state_machine.states`.
+- `acceptance.criteria`: Non-empty string array.
+
+---
+
+## serving-profile.json
+
+Produced by: **Serving or Runtime Adapter**
+Consumed by: **Execution, Validation, QA, Observability**
+
+Describes backend calls, capacity assumptions, replay results, and tradeoffs for
+the serving or runtime adapter path.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "backend": "local-node-runtime",
+  "calls": [
+    {
+      "call_id": "CALL-001",
+      "operation": "validateArtifact",
+      "latency_ms": 4,
+      "status": "succeeded"
+    }
+  ],
+  "capacity_model": {
+    "max_concurrency": 4,
+    "throughput_per_minute": 120
+  },
+  "replay_summary": {
+    "status": "passed",
+    "sample_count": 9
+  },
+  "tradeoffs": ["local validation is deterministic but does not measure remote provider latency"]
+}
+```
+
+### Field Rules
+
+- `version`, `task_id`, and `backend` are required strings.
+- `calls`: Non-empty array.
+- `calls[].call_id` and `calls[].operation`: Required strings.
+- `calls[].latency_ms`: Integer greater than or equal to 0.
+- `calls[].status`: Must be `succeeded`, `failed`, or `skipped`.
+- `capacity_model.max_concurrency`: Integer greater than or equal to 1.
+- `capacity_model.throughput_per_minute`: Integer greater than or equal to 0.
+- `replay_summary.status`: Must be `passed`, `warning`, or `failed`.
+- `replay_summary.sample_count`: Integer greater than or equal to 0.
+- `tradeoffs`: Non-empty string array.
+
+---
+
+## latent-communication-experiment.json
+
+Produced by: **Research or Evaluation Agent**
+Consumed by: **Governance, Review, Final Assessment**
+
+Documents baselines, explicit experiments, compatibility, safety checks, and a
+conclusion for latent communication evaluation.
+
+```json
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "baselines": [
+    {
+      "baseline_id": "BASE-001",
+      "description": "Single visible artifact contract per stage",
+      "metric": "replay correctness"
+    }
+  ],
+  "experiments": [
+    {
+      "experiment_id": "EXP-001",
+      "description": "Compare compact trace hints against explicit state snapshots",
+      "result": "Explicit state snapshots preserved replayability better than implicit hints."
+    }
+  ],
+  "compatibility": {
+    "status": "compatible",
+    "notes": "Experiment metadata can be stored without changing existing stage artifacts."
+  },
+  "safety": {
+    "status": "passed",
+    "checks": ["no hidden coordination channel is required for acceptance"]
+  },
+  "conclusion": "Latent communication experiments must remain observable through explicit artifacts."
+}
+```
+
+### Field Rules
+
+- `version` and `task_id` are required strings.
+- `baselines`: Non-empty array.
+- `baselines[].baseline_id`, `baselines[].description`, and `baselines[].metric`: Required strings.
+- `experiments`: Non-empty array.
+- `experiments[].experiment_id`, `experiments[].description`, and `experiments[].result`: Required strings.
+- `compatibility.status`: Must be `compatible`, `limited`, or `incompatible`.
+- `compatibility.notes`: Required string.
+- `safety.status`: Must be `passed`, `warning`, or `failed`.
+- `safety.checks`: Non-empty string array.
+- `conclusion`: Required string.

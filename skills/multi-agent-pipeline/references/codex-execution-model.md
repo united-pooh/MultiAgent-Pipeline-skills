@@ -13,10 +13,21 @@ The local Codex agent is the orchestrator. It owns:
 - Stage prompt construction
 - Tree Rubrics and Tree Grading aggregation
 - Merge and conflict decisions
-- Final integration and cleanup
+- Final integration decisions and cleanup bookkeeping
 
 Subagents own bounded stage work and return structured artifacts or proposal
-metadata. The orchestrator validates and writes canonical artifacts locally.
+metadata. The orchestrator validates and writes canonical artifacts locally,
+limited to pipeline state such as `.pipeline-workspace/` and `.pipeline-runs/`.
+
+## Write Authority
+
+- The orchestrator/main agent must never modify code or repo files directly.
+- The orchestrator may read code, dispatch stages, write MCP run bookkeeping,
+  validate artifacts, aggregate feedback, and report status.
+- File/code mutations are only allowed in Execution-stage worker subagents.
+- Validation, QA, Doc, Tree Rubrics, Tree Grading, Review, Final Assessment,
+  and every other non-Execution stage are read-only. They send failures,
+  required changes, and quality feedback back to Execution for repair.
 
 ## Subagent Delegation
 

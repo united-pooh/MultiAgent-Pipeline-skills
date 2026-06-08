@@ -33,13 +33,18 @@ blanks in the returned artifact.
 ## Rules
 
 - This stage is read-only. Do not edit files.
+- Failing or warning feedback must be returned to Execution for repair; Review
+  never patches files directly.
 - Evaluate independently. Do not assume other reviewers will catch issues.
 - Use evidence with concrete `file:line` references.
 - Be strict on correctness, security, missing tests, and architecture drift.
 - Judge the scoped worker group identified by `execution-report.json` and `merge-report.json`, even if the main workspace also contains other already-merged groups from the same wave.
 - For Correctness and Test Coverage, cite `validation-report.json` command output as evidence. If validation was not provided or did not pass/skip, those dimensions must be at most `warning`.
 - For Code Quality and Architecture Compliance, use `complexity-report.json` as supporting evidence when it is present. A low readability or high complexity conclusion is not automatically a fail, but it must be reconciled with the changed code and cited when relevant.
-- If the orchestrator explicitly attaches `ce-frontend-design`, use it and record it in `applied_skills`.
+- If the reviewed group required `ce-frontend-design`, apply the internal
+  frontend-design capability guidance from
+  `pipeline://methodologies/frontend-design` and record the label in
+  `applied_skills`.
 - When `ce-frontend-design` is active, produce `frontend_design_assessment` and map any issues back into the PRE dimensions instead of treating them as side notes.
 
 ## Process

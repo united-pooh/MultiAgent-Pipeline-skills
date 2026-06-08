@@ -6,7 +6,9 @@ export {
 } from "./runtime/artifact-templates.js";
 export {
   DEFAULT_CODEX_STAGE_PROFILES,
+  DEFAULT_ORCHESTRATOR_WRITE_AUTHORITY,
   DEFAULT_OPENCODE_EXPERT_STAGE_PROFILES,
+  DEFAULT_STAGE_WRITE_AUTHORITY,
   DEFAULT_STAGE_PROFILES,
 } from "./runtime/constants.js";
 export {
@@ -31,6 +33,12 @@ export { MergeEngine } from "./runtime/merge-engine.js";
 export { CODEX_PET_STATES, createCodexPetEvent } from "./runtime/pet-events.js";
 export { PipelineOrchestrator } from "./runtime/pipeline-orchestrator.js";
 export { aggregateReviewFeedback } from "./runtime/review-feedback.js";
+export {
+  buildOptimizedContextArtifacts,
+  buildTokenOptimizationReport,
+  estimatePromptSavings,
+  recommendMcpToolSubset,
+} from "./runtime/token-optimizer.js";
 export { aggregateTreeGradingFeedback, weightForDepth } from "./runtime/tree-grading.js";
 export { loadStageCatalog, resolveDefaultSkillPaths } from "./runtime/stage-catalog.js";
 export { extractSingleJsonBlock, validateArtifact } from "./runtime/contracts.js";
