@@ -112,6 +112,44 @@ const CODEX_STAGE_AGENT_TYPES = Object.freeze({
   "final-assessment": "default",
 });
 
+const EXECUTION_WRITE_AUTHORITY = Object.freeze({
+  repoFileMutationsAllowed: true,
+  codeFileMutationsAllowed: true,
+  mutationOwner: "execution-worker",
+  repairRouting: "Execution owns implementation and retry repairs.",
+});
+
+const READ_ONLY_STAGE_WRITE_AUTHORITY = Object.freeze({
+  repoFileMutationsAllowed: false,
+  codeFileMutationsAllowed: false,
+  mutationOwner: "execution-worker",
+  repairRouting: "Read-only stages send failures and feedback back to Execution for repair.",
+});
+
+export const DEFAULT_ORCHESTRATOR_WRITE_AUTHORITY = Object.freeze({
+  canModifyRepoFilesDirectly: false,
+  allowedWrites: Object.freeze([
+    "pipeline-workspace-bookkeeping",
+    "pipeline-artifacts",
+    "validation-results",
+    "reports",
+  ]),
+  rule: "orchestrator/main agent must never modify code or repo files directly; file/code mutations are only allowed in Execution-stage worker subagents.",
+});
+
+function buildStageWriteAuthority() {
+  return Object.freeze(
+    Object.fromEntries(
+      Object.keys(STAGE_FILES).map((stage) => [
+        stage,
+        stage === "execution" ? EXECUTION_WRITE_AUTHORITY : READ_ONLY_STAGE_WRITE_AUTHORITY,
+      ]),
+    ),
+  );
+}
+
+export const DEFAULT_STAGE_WRITE_AUTHORITY = buildStageWriteAuthority();
+
 function buildCodexStageProfiles() {
   return Object.freeze(
     Object.fromEntries(
@@ -121,6 +159,7 @@ function buildCodexStageProfiles() {
           ...DEFAULT_SUBAGENT_PROFILE,
           ...files,
           agentType: CODEX_STAGE_AGENT_TYPES[stage],
+          writeAuthority: DEFAULT_STAGE_WRITE_AUTHORITY[stage],
           waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
         },
       ]),
@@ -140,6 +179,7 @@ function buildOpenCodeExpertStageProfiles() {
           agentMode: "subagent",
           reasoningEffort: "high",
           ...files,
+          writeAuthority: DEFAULT_STAGE_WRITE_AUTHORITY[stage],
           waitTimeoutMs: DEFAULT_WAIT_TIMEOUT_MS,
         },
       ]),

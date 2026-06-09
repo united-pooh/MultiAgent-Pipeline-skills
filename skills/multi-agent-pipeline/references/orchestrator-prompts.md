@@ -10,8 +10,27 @@ Use these templates as default host-specific stage prompt scaffolds. Fill the pl
 - Pass artifact JSON inline when the subagent needs exact content; otherwise pass exact repo-relative or absolute paths.
 - Tell the subagent to return exactly one fenced `json` block and no extra prose, except for the Spec stage, which returns two blocks: one `json` and one `markdown`.
 - For retries or rework passes, name the triggering artifact and the current iteration.
-- For `Execution`, include the Playwright skill path only when real browser validation may be required.
-- For `Spec` and `Plan`, attach the `superpowers` skill and explicitly restrict it to brainstorming/planning discipline.
+- For `Execution`, request real browser validation only when it may be required
+  and suitable tooling is available.
+- For `Spec` and `Plan`, use skill-internal methodology references under
+  `references/methodologies/`; do not rely on external methodology packages.
+- The orchestrator/main agent must never modify code or repo files directly.
+  It may read code, dispatch stages, write pipeline workspace bookkeeping, validate
+  artifacts, aggregate feedback, and report.
+- File/code mutations are only allowed in Execution-stage worker subagents.
+- Validation, QA, Doc, Tree Rubrics, Tree Grading, Review, Final Assessment,
+  and every other non-Execution stage are read-only; send failures and feedback
+  back to Execution for repair.
+- Maintain one global 6-slot subagent pool across Execution, Validation, Tree
+  Rubrics, Tree Grading, and QA. Every spawned subagent in those stages consumes
+  one slot until it finishes.
+- Dispatch fanout is capped at 6 groups per wave and should maximize safe
+  concurrency up to 6 without inventing unsafe splits.
+- Let finished groups continue early into Validation, Tree Rubrics, Tree
+  Grading, and QA as soon as dependencies are satisfied and slots are
+  available; do not wait for the whole execution wave.
+- Tree Grading consumes 3 slots by default. Wait until 3 slots are available,
+  then spawn the 3 graders together.
 - Select the host adapter first. Codex and OpenCode use the same stage prompts and contracts but different tool schemas.
 
 ## Codex Adapter
@@ -43,6 +62,7 @@ Use this adapter from the custom primary agent documented in
 ## Brainstorming
 
 Brainstorming is orchestrator-local. Do not spawn a subagent for this stage.
+Follow `references/methodologies/brainstorming.md`.
 
 Write the approved or user-implied design to `.pipeline-workspace/design.md`:
 
@@ -68,8 +88,11 @@ You are the Spec stage for a multi-agent pipeline.
 Follow:
 - <skill>/agents/spec.md
 - <skill>/references/contracts.md
+- <skill>/references/methodologies/brainstorming.md
+- <skill>/references/methodologies/superpowers.md
 
-Use the attached `superpowers` skill only for brainstorming and planning discipline. Do not use its build, TDD, commit, or finish-branch behaviors.
+Use only the repo-owned internal methodology context. Do not rely on host
+methodology packages. Record `applied_skills: []`.
 
 Inputs:
 - design.md (brainstorming output):
@@ -91,7 +114,6 @@ Return exactly two fenced blocks and no extra prose:
   "agent_type": "default",
   "fork_context": false,
   "items": [
-    {"type": "skill", "name": "superpowers", "path": "<absolute_superpowers_skill_path>"},
     {"type": "text", "text": "<filled template above>"}
   ]
 }
@@ -107,8 +129,11 @@ You are the Spec stage (retry, iteration <n>) for a multi-agent pipeline.
 Follow:
 - <skill>/agents/spec.md
 - <skill>/references/contracts.md
+- references/methodologies/brainstorming.md
+- references/methodologies/superpowers.md
 
-Use the attached `superpowers` skill only for brainstorming and planning discipline. Do not use its build, TDD, commit, or finish-branch behaviors.
+Use only the repo-owned internal methodology context. Do not rely on host
+methodology packages. Record `applied_skills: []`.
 
 Inputs:
 - design.md (brainstorming output):
@@ -137,8 +162,10 @@ You are the Plan stage for a multi-agent pipeline.
 Follow:
 - <skill>/agents/plan.md
 - <skill>/references/contracts.md
+- references/methodologies/superpowers.md
 
-Use the attached `superpowers` skill only for planning discipline. Do not use its build, TDD, commit, or finish-branch behaviors.
+Use only the repo-owned internal methodology context. Do not rely on host
+methodology packages. Record `applied_skills: []`.
 
 Inputs:
 - spec.json:
@@ -154,7 +181,6 @@ Return exactly one fenced `json` block and no extra prose.
   "agent_type": "default",
   "fork_context": false,
   "items": [
-    {"type": "skill", "name": "superpowers", "path": "<absolute_superpowers_skill_path>"},
     {"type": "text", "text": "<filled template above>"}
   ]
 }
@@ -208,6 +234,9 @@ Inputs:
 <paste architecture.json content>
 
 Partition work into dependency-respecting worker groups with explicit file ownership.
+Each execution wave must contain at most 6 groups. Maximize safe concurrency up
+to 6 groups, merge excess independent components by affinity, and never invent
+unsafe splits.
 Derive `required_skills` only from `architecture.json.proposed_changes[].concerns`.
 Produce `dispatch.json`.
 Return exactly one fenced `json` block and no extra prose.
@@ -255,8 +284,8 @@ You are the Execution stage for a multi-agent pipeline.
 Follow:
 - <skill>/agents/execution.md
 - <skill>/references/contracts.md
-<only add the next line when browser validation may be required>
-- <playwright_skill_path>/SKILL.md
+<only add the next line when worker_group.required_skills includes ce-frontend-design>
+- references/methodologies/frontend-design.md
 
 Inputs:
 - spec.json:
@@ -265,13 +294,22 @@ Inputs:
 <paste plan.json content>
 - architecture.json:
 <paste architecture.json content>
+- assigned worker_group from dispatch.json:
+<paste worker_group content>
+- base_ref:
+<paste base_ref>
 - latest tree_grading_feedback.json: <paste content or omit>
 - validation-report.json from the previous attempt: <paste content or omit>
+- qa-report.json from the previous attempt: <paste content or omit>
 - Repo root: <repo_root>
 - Iteration: <n>
 
-Implement only within the ownership implied by `architecture.json`.
+Implement only within `worker_group.owned_files` plus directly adjacent tests or docs needed for this group.
+You are the only stage with repo file write authority. File/code mutations are only allowed in Execution-stage worker subagents.
+When `worker_group.required_skills` includes `ce-frontend-design`, apply the internal frontend-design capability guidance and record `ce-frontend-design` in `applied_skills`.
 You are not alone in the codebase; do not revert unrelated edits.
+On retries, you may add related same-group local goals inside the same ownership boundary.
+If the fix requires unowned files, cross-group ownership changes, or a different worker split, return `status = "blocked"` and start the first blocker with `REPLAN_REQUIRED:`.
 If the architecture cannot be implemented cleanly within constraints, return `status = "blocked"` and route upward with `recommended_next_stage` plus `rework_reason`.
 Return exactly one fenced `json` block and no extra prose.
 ```
@@ -303,8 +341,9 @@ Inputs:
 <paste merge-report.json content>
 - Repo root: <repo_root>
 
-Detect the project language, run the fix-layer and check-layer commands defined in agents/validation.md, and capture full stdout/stderr plus exit codes.
-Do not edit files except through explicitly documented fix-layer commands.
+Validation is read-only. Detect the project language, run the check-layer commands defined in agents/validation.md, and capture full stdout/stderr plus exit codes.
+Do not edit files or run formatter, auto-fix, auto-correct, code generation, dependency installation, or other repo-mutating commands.
+If checks fail, record `blocking_failures`; the orchestrator passes failed `validation-report.json` back to Execution, and Execution owns retry work.
 Do not interpret results or make pass/fail recommendations beyond setting the `status` field.
 Return exactly one fenced `json` block with `validation-report.json` and no extra prose.
 ```
@@ -339,7 +378,10 @@ Return exactly one fenced `json` block and no extra prose.
 
 ## Tree Rubrics Generation And Grading
 
-Run these stages after Validation passes or skips for a worker group.
+Run these stages after Validation passes or skips for a worker group. A group
+may enter this sequence as soon as it is ready and a global pool slot is
+available, even when other groups from the same execution wave are still
+running.
 
 ### Tree Classification
 
@@ -424,7 +466,8 @@ Return exactly one fenced `json` block with `tree_rubrics_refined.json` and no e
 
 ### Tree Grading
 
-Spawn all 3 graders before waiting on them.
+Tree Grading consumes 3 global pool slots by default. Wait until all 3 slots
+are available, then spawn all 3 graders before waiting on them.
 
 ```text
 Follow:
@@ -444,6 +487,7 @@ Inputs:
 - Iteration: <iteration>
 
 Only use the final output file contents. Do not use execution, merge, validation, complexity, logs, retries, or tool traces.
+This stage is read-only. Do not edit files; failing rubric evidence goes back to Execution for repair.
 Return exactly one fenced `json` block with `tree_grading_individual_N.json` and no extra prose.
 ```
 
@@ -467,8 +511,6 @@ Follow:
 - <skill>/agents/review.md
 - <skill>/references/contracts.md
 - <skill>/references/pre-rubric.md
-<only add the next line when browser validation may be required>
-- <playwright_skill_path>/SKILL.md
 
 Inputs:
 - spec.json:
@@ -485,6 +527,7 @@ Inputs:
 <paste validation-report.json content>
 - Repo root: <repo_root>
 - Review mode: PRE
+- Browser evidence: <paste evidence or say unavailable>
 
 This stage is read-only. Score all 8 PRE dimensions, set `recommended_next_stage` and `rework_reason` when needed, and return exactly one fenced `json` block with `review_individual_N.json`.
 
@@ -513,8 +556,6 @@ Follow:
 - <skill>/agents/review.md
 - <skill>/references/contracts.md
 - <skill>/references/pre-rubric.md
-<only add the next line when browser validation may be required>
-- <playwright_skill_path>/SKILL.md
 
 Inputs:
 - spec.json:
@@ -532,6 +573,7 @@ Inputs:
 - Repo root: <repo_root>
 - Review mode: EME
 - Reviewer ID: <reviewer_id>
+- Browser evidence: <paste evidence or say unavailable>
 
 Review independently. Do not assume other reviewers will catch issues.
 
@@ -557,8 +599,10 @@ You are the Plan rework stage for a multi-agent pipeline.
 Follow:
 - <skill>/agents/plan.md
 - <skill>/references/contracts.md
+- references/methodologies/superpowers.md
 
-Use the attached `superpowers` skill only for planning discipline. Do not use its build, TDD, commit, or finish-branch behaviors.
+Use only the repo-owned internal methodology context. Do not rely on host
+methodology packages. Record `applied_skills: []`.
 
 Inputs:
 - spec.json:
@@ -599,6 +643,12 @@ Inputs:
 - Repo root: <repo_root>
 
 Run dynamic or scenario validation that is not already covered by command-layer Validation.
+QA is read-only. Do not modify source, generated files, documentation, config, lockfiles, or repo-local fixtures; use external temporary locations when scenario tooling requires scratch files.
+If QA finds a blocking issue, record the same-group repair evidence or
+ownership/dependency concern in `blocking_issues` and `notes`. The orchestrator
+passes failed `qa-report.json` to Execution; Execution owns retry work and emits
+`REPLAN_REQUIRED:` as its first blocker when a different ownership split or
+re-dispatch is required.
 Return exactly one fenced `json` block with `qa-report.json` and no extra prose.
 ```
 
@@ -637,7 +687,8 @@ Inputs:
 <paste qa-report.json content>
 - Repo root: <repo_root>
 
-Update only the documentation that should change, including `CHANGELOG.md` when the repository has one.
+Doc is read-only. Audit documentation that should change, including `CHANGELOG.md` when the repository has one, but do not edit files.
+If documentation changes are required, return `status = "changes_required"`, list the required documentation paths in `updated_files`, and explain the needed Execution repair in `notes`.
 Do not commit or push; the orchestrator owns optional Git publication after integration.
 Return exactly one fenced `json` block with `doc-report.json` and no extra prose.
 ```

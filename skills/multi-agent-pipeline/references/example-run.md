@@ -17,7 +17,7 @@ User request:
 ```json
 {
   "version": "1.0",
-  "applied_skills": ["superpowers"],
+  "applied_skills": [],
   "feature_name": "Responsive dashboard shell refresh",
   "objective": "Improve dashboard navigation and visual hierarchy without changing analytics behavior.",
   "requirements": [
@@ -59,7 +59,7 @@ User request:
 ```json
 {
   "version": "1.0",
-  "applied_skills": ["superpowers"],
+  "applied_skills": [],
   "spec_ref": "spec.json",
   "phases": [
     {
@@ -348,14 +348,14 @@ User request:
   "skill_usage_summary": [
     {
       "scope": "spec",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
       "scope": "plan",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
@@ -384,14 +384,14 @@ User request:
   "skill_usage_summary": [
     {
       "scope": "spec",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
       "scope": "plan",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {

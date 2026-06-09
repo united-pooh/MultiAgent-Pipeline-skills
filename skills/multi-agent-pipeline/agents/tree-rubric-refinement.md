@@ -24,6 +24,7 @@ the returned artifact.
 
 ## Rules
 
+- This stage is read-only. Do not edit files.
 - Apply the minimum necessary changes.
 - Preserve node IDs for unchanged criteria.
 - Keep all nodes decidable from final output files only.

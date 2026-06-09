@@ -12,17 +12,21 @@ For each spawned stage:
 - Read the current stage's `templates/artifacts/<artifact>.json` as the nearby
   JSON skeleton. Use it to keep output structure stable under tight context.
 - Pass artifact contents or exact file paths explicitly.
-- For any required skill, include the exact skill name and absolute path valid
-  in the current environment.
-- Spec and Plan prompts must attach `superpowers` and explicitly forbid its
-  build, TDD, commit, and finish-branch behaviors.
-- Execution prompts must attach `ce-frontend-design` whenever
-  `worker_group.required_skills` contains it.
+- For routed Execution capability labels, pass the exact label values from
+  `worker_group.required_skills`.
+- Spec and Plan prompts must use the repo-owned internal methodology references
+  under `references/methodologies/` and must not require external methodology
+  packages.
+- Execution prompts must include `references/methodologies/frontend-design.md`
+  whenever `worker_group.required_skills` contains `ce-frontend-design`.
 - When this skill was explicitly invoked by the user, prompts may treat
   subagent delegation and safe parallel work as authorized within host
   constraints.
 - Tell subagents to return the exact fenced block format required by the stage
   prompt.
+- Execution prompts must pass the assigned `worker_group`, `base_ref`, and any
+  retry feedback explicitly. Tell retry workers to return a `REPLAN_REQUIRED:`
+  blocker when the fix needs unowned files or changed group ownership.
 
 For copy-ready prompt scaffolds, use `references/orchestrator-prompts.md`.
 
@@ -46,6 +50,24 @@ For copy-ready prompt scaffolds, use `references/orchestrator-prompts.md`.
 - Cleanup eligibility is derived locally after Validation, Tree Grading, and QA
   pass.
 
+## Global 6-Slot Subagent Pool
+
+The orchestrator runs one global pool of 6 subagent slots across Execution,
+Validation, Tree Rubrics, Tree Grading, and QA.
+
+- Every spawned subagent in those stages consumes one slot until it finishes.
+- Dispatch may fan out at most 6 Execution groups in a wave and should maximize
+  safe concurrency up to that limit.
+- Groups continue independently after merge. A finished group may immediately
+  advance to Validation, Tree Rubrics, Tree Grading, or QA when the next stage's
+  dependencies are satisfied and enough slots are free.
+- Do not wait for the rest of an execution wave before starting downstream
+  review stages for a group that is already ready.
+- Tree Grading consumes 3 slots by default. Start it only when 3 slots are
+  available, then spawn the grader trio together.
+- If fewer than 3 slots are available for Tree Grading, run other ready
+  one-slot stages or wait; do not spawn a partial grader set.
+
 ## Tree Grading Aggregation
 
 The orchestrator merges grader outputs locally:
@@ -61,10 +83,10 @@ The orchestrator merges grader outputs locally:
   `tree_grading_feedback.json`.
 
 Operational note: Tree Grading is the most likely point to hit thread limits
-because it spawns three graders at once. Close finished stage agents before
-spawning the grader trio. If a grader spawn fails from temporary thread
-pressure, close finished idle agents and retry the missing grader instead of
-silently downgrading the grader count.
+because it consumes three slots at once. Wait until 3 slots are free, close
+finished stage agents, and then spawn the grader trio. If a grader spawn fails
+from temporary thread pressure, close finished idle agents and retry the missing
+grader instead of silently downgrading the grader count.
 
 ## File Ownership And Worker Routing
 
@@ -77,6 +99,12 @@ When spawning `worker` agents:
   complete the task.
 - Tell the worker it is not alone in the codebase and must not revert edits it
   did not make.
+- On retries, tell the worker it may add related same-group local goals only
+  inside its ownership boundary or adjacent tests/docs.
+- If a fix requires unowned files, cross-group ownership changes, or a new
+  worker split, the worker must return `status = "blocked"` with the first
+  blocker beginning `REPLAN_REQUIRED:` so the orchestrator can restart at
+  Dispatch.
 - Treat uploaded worker changes as proposals until merged into the main
   workspace.
 
@@ -113,10 +141,11 @@ When spawning `worker` agents:
 - Commit subjects use `type(scope): :gitmoji: 中文描述`, for example
   `feat(pipeline): :sparkles: 完成流水线交付`. This keeps the subject compatible
   with Conventional Commits while preserving gitmoji and Chinese intent.
-- Doc publication runs only after the documentation proposal merges cleanly. By
-  default it stages `doc-report.updated_files`, commits with
-  `docs(pipeline): :memo: 更新流水线交付文档`, and does not push unless the Doc
-  phase policy enables push.
+- Doc publication runs only after Execution-produced documentation changes are
+  integrated and accepted. By default it stages the accepted documentation paths
+  recorded in `doc-report.updated_files`, commits with
+  `docs(pipeline): :memo: 更新流水线交付文档`, and does not push unless the Doc phase
+  policy enables push.
 - Cleanup publication runs only after Final Assessment accepts the run and
   `.pipeline-workspace/` has been removed. By default it stages the final
   worktree, commits with `feat(pipeline): :sparkles: 完成流水线交付`, and pushes to

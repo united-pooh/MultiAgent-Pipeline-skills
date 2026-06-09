@@ -23,6 +23,7 @@ the returned artifact.
 
 ## Rules
 
+- This stage is read-only. Do not edit files.
 - First enumerate candidate criteria from the task requirements and acceptance criteria.
 - Then organize them by breadth and depth.
 - Branches must be independent dimensions.

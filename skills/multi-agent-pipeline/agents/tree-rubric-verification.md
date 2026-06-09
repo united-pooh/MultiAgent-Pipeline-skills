@@ -35,6 +35,7 @@ Evaluate exactly these seven dimensions in order:
 
 ## Rules
 
+- This stage is read-only. Do not edit files.
 - Mark a dimension `fail` when it requires refinement before grading can be trusted.
 - Suggestions must be concrete and minimal.
 - Do not lower core task requirements.

@@ -19,12 +19,14 @@ Return exactly one fenced `json` block containing a `plan.json` payload matching
 Use `templates/artifacts/plan.json` as the JSON skeleton. Fill semantic fields
 from the spec; do not leave template blanks in the returned artifact.
 
-## Planning Skill Requirement
+## Internal Methodology Requirement
 
-- The orchestrator must explicitly attach the `superpowers` skill name and current-environment path in your prompt.
-- Use only the skill's brainstorming and planning discipline.
-- Do not execute `superpowers` build, TDD, commit, branch-finishing, or code-writing behaviors in this stage.
-- Record `applied_skills: ["superpowers"]` in `plan.json`.
+- Use the repo-owned methodology references bundled with this skill:
+  - `references/methodologies/superpowers.md`
+- Do not require any external skill package for this methodology.
+- Apply only planning discipline in this stage. Do not execute build, TDD,
+  commit, branch-finishing, or code-writing behaviors.
+- Record `applied_skills: []` in `plan.json`.
 
 ## Process
 

@@ -1,0 +1,22 @@
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "backend": "local-node-runtime",
+  "calls": [
+    {
+      "call_id": "CALL-001",
+      "operation": "validateArtifact",
+      "latency_ms": 4,
+      "status": "succeeded"
+    }
+  ],
+  "capacity_model": {
+    "max_concurrency": 4,
+    "throughput_per_minute": 120
+  },
+  "replay_summary": {
+    "status": "passed",
+    "sample_count": 9
+  },
+  "tradeoffs": ["local validation is deterministic but does not measure remote provider latency"]
+}

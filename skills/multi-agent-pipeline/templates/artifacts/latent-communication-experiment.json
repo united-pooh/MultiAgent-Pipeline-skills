@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "baselines": [
+    {
+      "baseline_id": "BASE-001",
+      "description": "Single visible artifact contract per stage",
+      "metric": "replay correctness"
+    }
+  ],
+  "experiments": [
+    {
+      "experiment_id": "EXP-001",
+      "description": "Compare compact trace hints against explicit state snapshots",
+      "result": "Explicit state snapshots preserved replayability better than implicit hints."
+    }
+  ],
+  "compatibility": {
+    "status": "compatible",
+    "notes": "Experiment metadata can be stored without changing existing stage artifacts."
+  },
+  "safety": {
+    "status": "passed",
+    "checks": ["no hidden coordination channel is required for acceptance"]
+  },
+  "conclusion": "Latent communication experiments must remain observable through explicit artifacts."
+}

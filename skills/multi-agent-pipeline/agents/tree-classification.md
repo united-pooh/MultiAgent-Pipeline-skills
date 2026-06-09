@@ -23,6 +23,7 @@ returned artifact.
 
 ## Rules
 
+- This stage is read-only. Do not edit files.
 - Set `task_type` to the best task category, usually `code_implementation` for code changes.
 - Set `depth_enhancement_applicable = true` when the task contains explanation, judgment, analysis, or free-text output requirements.
 - Recommend 2-5 independent branches where possible.

@@ -37,6 +37,8 @@ load cheaply, then read only the files needed for the current stage.
 - For workspace layout and pet events, read `references/workspace-and-events.md`.
 - For orchestration, artifact, grading, merge, and cleanup rules, read
   `references/orchestration-rules.md`.
+- For bundled brainstorming/planning/frontend-design methodology, read only the
+  needed file under `references/methodologies/`.
 - For subagent prompts, read only the current `agents/<stage>.md`.
 - For artifact shapes, read `references/contracts.md`.
 - For nearby JSON skeletons, read only the current
@@ -117,9 +119,10 @@ the active quality gate is Tree Rubrics plus Tree Grading.
   automatic merge safety is ambiguous.
 - Do not revert user edits or unrelated worktree changes.
 - Dispatch owns skill routing. Later stages must not re-infer required skills.
-- Spec and Plan must attach `superpowers` and restrict it to planning
-  discipline only.
-- Execution must attach `ce-frontend-design` when Dispatch routes it.
+- Spec and Plan use the bundled methodology references under
+  `references/methodologies/` and must not attach external methodology skills.
+- Execution applies the bundled frontend-design guidance when Dispatch routes
+  `ce-frontend-design`.
 - Validation must run before Tree Rubrics for every merged worker group unless
   it is explicitly skipped with evidence.
 - Tree Grading uses 3 independent graders by default. Do not downgrade the
@@ -183,9 +186,11 @@ For a copy-ready expert primary agent, use
 
 The Node runtime under `src/runtime/` implements the documented contracts for
 artifact storage, stage catalogs, merge, complexity analysis, validation flow,
-Tree Rubrics, Tree Grading, final assessment, cleanup summaries, and Codex pet
-events. Optional Git publication uses gitmoji plus Conventional Commits style
-Chinese messages. Run tests from the skill package root with:
+Tree Rubrics, Tree Grading, final assessment, cleanup summaries, token/context
+optimization, cache observability, research harnesses, agent traces, state
+snapshots, governance reports, protocol sandboxes, and Codex pet events.
+Optional Git publication uses gitmoji plus Conventional Commits style Chinese
+messages. Run tests from the skill package root with:
 
 ```text
 npm test

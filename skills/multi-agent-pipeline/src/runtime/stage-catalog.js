@@ -1,12 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 
-import { DEFAULT_STAGE_PROFILES, defaultCodexHome } from "./constants.js";
-
-const SKILL_RELATIVE_PATHS = Object.freeze({
-  superpowers: "skills/superpowers/SKILL.md",
-  "ce-frontend-design": "skills/ce-frontend-design/SKILL.md",
-});
+import { DEFAULT_STAGE_PROFILES } from "./constants.js";
 
 function cloneReference(reference) {
   return { ...reference };
@@ -20,12 +15,8 @@ function parseJsonReference(reference) {
   }
 }
 
-export function resolveDefaultSkillPaths({ codexHome = defaultCodexHome(), overrides = {} } = {}) {
-  return {
-    superpowers: path.join(codexHome, SKILL_RELATIVE_PATHS.superpowers),
-    "ce-frontend-design": path.join(codexHome, SKILL_RELATIVE_PATHS["ce-frontend-design"]),
-    ...overrides,
-  };
+export function resolveDefaultSkillPaths({ overrides = {} } = {}) {
+  return { ...overrides };
 }
 
 export class StageCatalog {
@@ -59,18 +50,13 @@ export class StageCatalog {
 
   resolveRequiredSkills(stage, { workerGroup = null } = {}) {
     if (stage === "spec" || stage === "plan") {
-      return [
-        {
-          name: "superpowers",
-          path: this.skillPaths.superpowers,
-        },
-      ];
+      return [];
     }
 
     if ((stage === "execution" || stage === "review") && workerGroup) {
       return (workerGroup.required_skills ?? []).map((skillName) => ({
         name: skillName,
-        path: this.skillPaths[skillName],
+        source: "skill-internal-capability",
       }));
     }
 

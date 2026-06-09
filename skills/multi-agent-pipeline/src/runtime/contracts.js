@@ -8,6 +8,8 @@ import { ContractValidationError } from "./errors.js";
 import { CODEX_PET_STATES } from "./pet-events.js";
 import { uniqueStrings } from "./utils.js";
 
+const MAX_DISPATCH_GROUPS_PER_WAVE = 6;
+
 function fail(artifactName, message) {
   throw new ContractValidationError(artifactName, message);
 }
@@ -135,9 +137,9 @@ function validateSpec(artifact) {
   const spec = expectObject(artifact, artifactName, artifactName);
   expectVersion(spec.version, artifactName);
 
-  const appliedSkills = expectAppliedSkills(spec.applied_skills, artifactName, ["superpowers"]);
-  if (appliedSkills.length !== 1 || appliedSkills[0] !== "superpowers") {
-    fail(artifactName, "applied_skills must be [\"superpowers\"]");
+  const appliedSkills = expectAppliedSkills(spec.applied_skills, artifactName);
+  if (appliedSkills.length !== 0) {
+    fail(artifactName, "applied_skills must be []");
   }
 
   expectString(spec.feature_name, "feature_name", artifactName);
@@ -179,9 +181,9 @@ function validatePlan(artifact) {
   const plan = expectObject(artifact, artifactName, artifactName);
   expectVersion(plan.version, artifactName);
 
-  const appliedSkills = expectAppliedSkills(plan.applied_skills, artifactName, ["superpowers"]);
-  if (appliedSkills.length !== 1 || appliedSkills[0] !== "superpowers") {
-    fail(artifactName, "applied_skills must be [\"superpowers\"]");
+  const appliedSkills = expectAppliedSkills(plan.applied_skills, artifactName);
+  if (appliedSkills.length !== 0) {
+    fail(artifactName, "applied_skills must be []");
   }
 
   if (plan.spec_ref !== "spec.json") {
@@ -441,6 +443,12 @@ function validateDispatch(artifact, context = {}) {
     const groups = expectStringArray(entry.groups, `execution_waves[${index}].groups`, artifactName, {
       minLength: 1,
     });
+    if (groups.length > MAX_DISPATCH_GROUPS_PER_WAVE) {
+      fail(
+        artifactName,
+        `execution_waves[${index}].groups exceeds max of ${MAX_DISPATCH_GROUPS_PER_WAVE} groups per wave`,
+      );
+    }
 
     const seenFiles = new Set();
     for (const groupId of groups) {
@@ -628,6 +636,13 @@ function validateExecutionReport(artifact, context = {}) {
 
   if (report.status === "blocked" && blockers.length === 0) {
     fail(artifactName, "blockers must be non-empty when status is blocked");
+  }
+
+  const replanBlockerIndex = blockers.findIndex((blocker) =>
+    blocker.trimStart().startsWith("REPLAN_REQUIRED:"),
+  );
+  if (replanBlockerIndex > 0) {
+    fail(artifactName, "REPLAN_REQUIRED must be the first blocker when present");
   }
 
   return report;
@@ -1418,7 +1433,7 @@ function validateValidationReport(artifact, context = {}) {
   commandsRun.forEach((commandEntry, index) => {
     const entry = expectObject(commandEntry, `commands_run[${index}]`, artifactName);
     expectString(entry.command, `commands_run[${index}].command`, artifactName);
-    expectEnum(entry.type, `commands_run[${index}].type`, artifactName, ["fix", "check"]);
+    expectEnum(entry.type, `commands_run[${index}].type`, artifactName, ["check"]);
     expectNullableInteger(entry.exit_code, `commands_run[${index}].exit_code`, artifactName, {
       min: 0,
     });
@@ -1507,11 +1522,18 @@ function validateDocReport(artifact) {
   const artifactName = "doc-report";
   const report = expectObject(artifact, artifactName, artifactName);
   expectVersion(report.version, artifactName);
-  expectEnum(report.status, "status", artifactName, ["updated", "no_changes_needed"]);
+  expectEnum(report.status, "status", artifactName, [
+    "updated",
+    "no_changes_needed",
+    "changes_required",
+  ]);
   const updatedFiles = expectStringArray(report.updated_files, "updated_files", artifactName);
 
-  if (report.status === "updated" && updatedFiles.length === 0) {
-    fail(artifactName, "updated_files must be non-empty when status is updated");
+  if (["updated", "changes_required"].includes(report.status) && updatedFiles.length === 0) {
+    fail(
+      artifactName,
+      "updated_files must be non-empty when status is updated or changes_required",
+    );
   }
 
   if (report.status === "no_changes_needed" && updatedFiles.length > 0) {
@@ -1524,7 +1546,7 @@ function validateDocReport(artifact) {
 }
 
 function validateSkillUsageSummary(value, artifactName) {
-  const items = expectArray(value, "skill_usage_summary", artifactName, { minLength: 1 });
+  const items = expectArray(value, "skill_usage_summary", artifactName);
   items.forEach((item, index) => {
     const entry = expectObject(item, `skill_usage_summary[${index}]`, artifactName);
     expectString(entry.scope, `skill_usage_summary[${index}].scope`, artifactName);
@@ -1789,6 +1811,429 @@ function validateRunSummary(artifact) {
   return summary;
 }
 
+function expectObjectArray(value, fieldName, artifactName, { minLength = 0 } = {}) {
+  const items = expectArray(value, fieldName, artifactName, { minLength });
+  return items.map((item, index) => expectObject(item, `${fieldName}[${index}]`, artifactName));
+}
+
+function validateResearchHarnessState(artifact) {
+  const artifactName = "research-harness-state";
+  const state = expectObject(artifact, artifactName, artifactName);
+  expectVersion(state.version, artifactName);
+  expectString(state.report_path, "report_path", artifactName);
+  expectString(state.generated_for_date, "generated_for_date", artifactName);
+
+  expectObjectArray(state.sources_seen, "sources_seen", artifactName, { minLength: 1 }).forEach(
+    (source, index) => {
+      expectString(source.source_id, `sources_seen[${index}].source_id`, artifactName);
+      expectString(source.source_type, `sources_seen[${index}].source_type`, artifactName);
+      expectString(source.title, `sources_seen[${index}].title`, artifactName);
+      expectString(source.locator, `sources_seen[${index}].locator`, artifactName);
+    },
+  );
+
+  expectObjectArray(state.candidate_index, "candidate_index", artifactName, {
+    minLength: 1,
+  }).forEach((candidate, index) => {
+    expectString(candidate.candidate_id, `candidate_index[${index}].candidate_id`, artifactName);
+    expectString(candidate.title, `candidate_index[${index}].title`, artifactName);
+    expectEnum(candidate.status, `candidate_index[${index}].status`, artifactName, [
+      "selected",
+      "queued",
+      "rejected",
+    ]);
+  });
+
+  expectObjectArray(state.evidence_map, "evidence_map", artifactName, { minLength: 1 }).forEach(
+    (evidence, index) => {
+      expectString(evidence.candidate_id, `evidence_map[${index}].candidate_id`, artifactName);
+      expectStringArray(evidence.source_ids, `evidence_map[${index}].source_ids`, artifactName, {
+        minLength: 1,
+      });
+      expectString(evidence.summary, `evidence_map[${index}].summary`, artifactName);
+    },
+  );
+
+  const rubric = expectObject(state.rubric, "rubric", artifactName);
+  expectStringArray(rubric.criteria, "rubric.criteria", artifactName, { minLength: 1 });
+  expectInteger(rubric.minimum_evidence_count, "rubric.minimum_evidence_count", artifactName, {
+    min: 0,
+  });
+
+  const outputValidation = expectObject(
+    state.output_validation,
+    "output_validation",
+    artifactName,
+  );
+  expectEnum(outputValidation.status, "output_validation.status", artifactName, [
+    "passed",
+    "warning",
+    "failed",
+  ]);
+  expectStringArray(outputValidation.checks, "output_validation.checks", artifactName, {
+    minLength: 1,
+  });
+
+  return state;
+}
+
+function validateContextManifest(artifact) {
+  const artifactName = "context-manifest";
+  const manifest = expectObject(artifact, artifactName, artifactName);
+  expectVersion(manifest.version, artifactName);
+  expectString(manifest.task_id, "task_id", artifactName);
+  expectString(manifest.compiled_at, "compiled_at", artifactName);
+
+  expectObjectArray(manifest.blocks, "blocks", artifactName, { minLength: 1 }).forEach(
+    (block, index) => {
+      expectString(block.id, `blocks[${index}].id`, artifactName);
+      expectString(block.version, `blocks[${index}].version`, artifactName);
+      expectString(block.source, `blocks[${index}].source`, artifactName);
+      expectInteger(block.priority, `blocks[${index}].priority`, artifactName, { min: 0 });
+      expectString(block.tenant_scope, `blocks[${index}].tenant_scope`, artifactName);
+      expectBoolean(block.cacheable, `blocks[${index}].cacheable`, artifactName);
+      expectBoolean(block.evictable, `blocks[${index}].evictable`, artifactName);
+      expectBoolean(block.requires_approval, `blocks[${index}].requires_approval`, artifactName);
+      expectString(block.hash, `blocks[${index}].hash`, artifactName);
+    },
+  );
+
+  const promptDiff = expectObject(manifest.prompt_diff, "prompt_diff", artifactName);
+  expectString(promptDiff.summary, "prompt_diff.summary", artifactName);
+  expectStringArray(promptDiff.added_blocks, "prompt_diff.added_blocks", artifactName);
+  expectStringArray(promptDiff.removed_blocks, "prompt_diff.removed_blocks", artifactName);
+
+  return manifest;
+}
+
+function validateAgentTrace(artifact) {
+  const artifactName = "agent-trace";
+  const trace = expectObject(artifact, artifactName, artifactName);
+  expectVersion(trace.version, artifactName);
+  expectString(trace.task_id, "task_id", artifactName);
+  expectString(trace.started_at, "started_at", artifactName);
+
+  expectObjectArray(trace.events, "events", artifactName, { minLength: 1 }).forEach(
+    (event, index) => {
+      expectEnum(event.type, `events[${index}].type`, artifactName, [
+        "message",
+        "tool_call",
+        "tool_result",
+        "file_diff",
+        "validation",
+        "retry",
+        "failure",
+        "cost",
+      ]);
+      expectString(event.at, `events[${index}].at`, artifactName);
+      expectString(event.summary, `events[${index}].summary`, artifactName);
+    },
+  );
+
+  const summary = expectObject(trace.summary, "summary", artifactName);
+  expectEnum(summary.status, "summary.status", artifactName, [
+    "completed",
+    "blocked",
+    "failed",
+  ]);
+  expectString(summary.outcome, "summary.outcome", artifactName);
+
+  return trace;
+}
+
+function validateStateStoreSnapshot(artifact) {
+  const artifactName = "state-store-snapshot";
+  const snapshot = expectObject(artifact, artifactName, artifactName);
+  expectVersion(snapshot.version, artifactName);
+  expectString(snapshot.task_id, "task_id", artifactName);
+
+  const activePath = expectObject(snapshot.active_path, "active_path", artifactName);
+  expectString(activePath.path_id, "active_path.path_id", artifactName);
+  expectString(activePath.current_stage, "active_path.current_stage", artifactName);
+
+  expectObjectArray(snapshot.candidate_pool, "candidate_pool", artifactName, {
+    minLength: 1,
+  }).forEach((candidate, index) => {
+    expectString(candidate.candidate_id, `candidate_pool[${index}].candidate_id`, artifactName);
+    expectEnum(candidate.status, `candidate_pool[${index}].status`, artifactName, [
+      "active",
+      "parked",
+      "rejected",
+    ]);
+  });
+
+  expectObjectArray(snapshot.evidence_links, "evidence_links", artifactName).forEach(
+    (link, index) => {
+      expectString(link.evidence_id, `evidence_links[${index}].evidence_id`, artifactName);
+      expectString(link.source, `evidence_links[${index}].source`, artifactName);
+      expectString(link.target, `evidence_links[${index}].target`, artifactName);
+    },
+  );
+
+  expectObjectArray(snapshot.failed_branches, "failed_branches", artifactName).forEach(
+    (branch, index) => {
+      expectString(branch.branch_id, `failed_branches[${index}].branch_id`, artifactName);
+      expectString(branch.reason, `failed_branches[${index}].reason`, artifactName);
+    },
+  );
+
+  expectObjectArray(snapshot.rollback_boundaries, "rollback_boundaries", artifactName, {
+    minLength: 1,
+  }).forEach((boundary, index) => {
+    expectString(boundary.boundary_id, `rollback_boundaries[${index}].boundary_id`, artifactName);
+    expectString(boundary.restore_ref, `rollback_boundaries[${index}].restore_ref`, artifactName);
+  });
+
+  expectObjectArray(snapshot.memory_channel_checks, "memory_channel_checks", artifactName, {
+    minLength: 1,
+  }).forEach((check, index) => {
+    expectString(check.channel, `memory_channel_checks[${index}].channel`, artifactName);
+    expectEnum(check.status, `memory_channel_checks[${index}].status`, artifactName, [
+      "passed",
+      "warning",
+      "failed",
+    ]);
+  });
+
+  return snapshot;
+}
+
+function validateCacheObservabilityReport(artifact) {
+  const artifactName = "cache-observability-report";
+  const report = expectObject(artifact, artifactName, artifactName);
+  expectVersion(report.version, artifactName);
+  expectString(report.task_id, "task_id", artifactName);
+  expectString(report.generated_at, "generated_at", artifactName);
+
+  expectObjectArray(report.prompt_components, "prompt_components", artifactName, {
+    minLength: 1,
+  }).forEach((component, index) => {
+    expectString(component.component_id, `prompt_components[${index}].component_id`, artifactName);
+    expectString(component.role, `prompt_components[${index}].role`, artifactName);
+    expectString(component.hash, `prompt_components[${index}].hash`, artifactName);
+    expectEnum(component.cache_policy, `prompt_components[${index}].cache_policy`, artifactName, [
+      "stable",
+      "volatile",
+      "bypass",
+    ]);
+  });
+
+  const stablePrefix = expectObject(report.stable_prefix, "stable_prefix", artifactName);
+  expectString(stablePrefix.hash, "stable_prefix.hash", artifactName);
+  expectInteger(stablePrefix.token_count, "stable_prefix.token_count", artifactName, { min: 0 });
+
+  const providerMetrics = expectObject(report.provider_metrics, "provider_metrics", artifactName);
+  expectString(providerMetrics.provider, "provider_metrics.provider", artifactName);
+  expectInteger(providerMetrics.prompt_tokens, "provider_metrics.prompt_tokens", artifactName, {
+    min: 0,
+  });
+  expectInteger(providerMetrics.cached_tokens, "provider_metrics.cached_tokens", artifactName, {
+    min: 0,
+  });
+
+  expectObjectArray(report.findings, "findings", artifactName).forEach((finding, index) => {
+    expectEnum(finding.severity, `findings[${index}].severity`, artifactName, [
+      "info",
+      "warning",
+      "error",
+    ]);
+    expectString(finding.summary, `findings[${index}].summary`, artifactName);
+  });
+
+  return report;
+}
+
+function validateGovernanceReport(artifact) {
+  const artifactName = "governance-report";
+  const report = expectObject(artifact, artifactName, artifactName);
+  expectVersion(report.version, artifactName);
+  expectString(report.task_id, "task_id", artifactName);
+
+  expectObjectArray(report.source_graph, "source_graph", artifactName, { minLength: 1 }).forEach(
+    (node, index) => {
+      expectString(node.node_id, `source_graph[${index}].node_id`, artifactName);
+      expectString(node.source, `source_graph[${index}].source`, artifactName);
+      expectEnum(node.trust_level, `source_graph[${index}].trust_level`, artifactName, [
+        "trusted",
+        "untrusted",
+        "quarantined",
+      ]);
+    },
+  );
+
+  expectObjectArray(report.quarantined_items, "quarantined_items", artifactName).forEach(
+    (item, index) => {
+      expectString(item.item_id, `quarantined_items[${index}].item_id`, artifactName);
+      expectString(item.reason, `quarantined_items[${index}].reason`, artifactName);
+    },
+  );
+
+  expectObjectArray(report.approval_gates, "approval_gates", artifactName, {
+    minLength: 1,
+  }).forEach((gate, index) => {
+    expectString(gate.gate_id, `approval_gates[${index}].gate_id`, artifactName);
+    expectEnum(gate.status, `approval_gates[${index}].status`, artifactName, [
+      "approved",
+      "pending",
+      "rejected",
+    ]);
+  });
+
+  expectString(report.tenant_scope, "tenant_scope", artifactName);
+
+  expectObjectArray(report.memory_injection_checks, "memory_injection_checks", artifactName, {
+    minLength: 1,
+  }).forEach((check, index) => {
+    expectString(check.check_id, `memory_injection_checks[${index}].check_id`, artifactName);
+    expectEnum(check.status, `memory_injection_checks[${index}].status`, artifactName, [
+      "passed",
+      "warning",
+      "failed",
+    ]);
+  });
+
+  expectStringArray(report.conclusions, "conclusions", artifactName, { minLength: 1 });
+
+  return report;
+}
+
+function validateProtocolDag(artifact) {
+  const artifactName = "protocol-dag";
+  const dag = expectObject(artifact, artifactName, artifactName);
+  expectVersion(dag.version, artifactName);
+  expectString(dag.task_id, "task_id", artifactName);
+
+  const anchor = expectObject(dag.single_agent_anchor, "single_agent_anchor", artifactName);
+  expectString(anchor.role, "single_agent_anchor.role", artifactName);
+  expectStringArray(
+    anchor.responsibilities,
+    "single_agent_anchor.responsibilities",
+    artifactName,
+    { minLength: 1 },
+  );
+
+  const nodeIds = new Set();
+  expectObjectArray(dag.nodes, "nodes", artifactName, { minLength: 1 }).forEach((node, index) => {
+    expectString(node.id, `nodes[${index}].id`, artifactName);
+    if (nodeIds.has(node.id)) {
+      fail(artifactName, `duplicate node id ${node.id}`);
+    }
+
+    nodeIds.add(node.id);
+    expectString(node.type, `nodes[${index}].type`, artifactName);
+    expectString(node.label, `nodes[${index}].label`, artifactName);
+  });
+
+  expectObjectArray(dag.edges, "edges", artifactName).forEach((edge, index) => {
+    expectString(edge.from, `edges[${index}].from`, artifactName);
+    expectString(edge.to, `edges[${index}].to`, artifactName);
+    if (!nodeIds.has(edge.from) || !nodeIds.has(edge.to)) {
+      fail(artifactName, `edges[${index}] must reference known nodes`);
+    }
+  });
+
+  const stateMachine = expectObject(dag.state_machine, "state_machine", artifactName);
+  expectStringArray(stateMachine.states, "state_machine.states", artifactName, { minLength: 1 });
+  expectString(stateMachine.initial_state, "state_machine.initial_state", artifactName);
+  if (!stateMachine.states.includes(stateMachine.initial_state)) {
+    fail(artifactName, "state_machine.initial_state must be listed in state_machine.states");
+  }
+
+  const acceptance = expectObject(dag.acceptance, "acceptance", artifactName);
+  expectStringArray(acceptance.criteria, "acceptance.criteria", artifactName, { minLength: 1 });
+
+  return dag;
+}
+
+function validateServingProfile(artifact) {
+  const artifactName = "serving-profile";
+  const profile = expectObject(artifact, artifactName, artifactName);
+  expectVersion(profile.version, artifactName);
+  expectString(profile.task_id, "task_id", artifactName);
+  expectString(profile.backend, "backend", artifactName);
+
+  expectObjectArray(profile.calls, "calls", artifactName, { minLength: 1 }).forEach(
+    (call, index) => {
+      expectString(call.call_id, `calls[${index}].call_id`, artifactName);
+      expectString(call.operation, `calls[${index}].operation`, artifactName);
+      expectInteger(call.latency_ms, `calls[${index}].latency_ms`, artifactName, { min: 0 });
+      expectEnum(call.status, `calls[${index}].status`, artifactName, [
+        "succeeded",
+        "failed",
+        "skipped",
+      ]);
+    },
+  );
+
+  const capacityModel = expectObject(profile.capacity_model, "capacity_model", artifactName);
+  expectInteger(capacityModel.max_concurrency, "capacity_model.max_concurrency", artifactName, {
+    min: 1,
+  });
+  expectInteger(
+    capacityModel.throughput_per_minute,
+    "capacity_model.throughput_per_minute",
+    artifactName,
+    { min: 0 },
+  );
+
+  const replaySummary = expectObject(profile.replay_summary, "replay_summary", artifactName);
+  expectEnum(replaySummary.status, "replay_summary.status", artifactName, [
+    "passed",
+    "warning",
+    "failed",
+  ]);
+  expectInteger(replaySummary.sample_count, "replay_summary.sample_count", artifactName, {
+    min: 0,
+  });
+
+  expectStringArray(profile.tradeoffs, "tradeoffs", artifactName, { minLength: 1 });
+
+  return profile;
+}
+
+function validateLatentCommunicationExperiment(artifact) {
+  const artifactName = "latent-communication-experiment";
+  const experiment = expectObject(artifact, artifactName, artifactName);
+  expectVersion(experiment.version, artifactName);
+  expectString(experiment.task_id, "task_id", artifactName);
+
+  expectObjectArray(experiment.baselines, "baselines", artifactName, { minLength: 1 }).forEach(
+    (baseline, index) => {
+      expectString(baseline.baseline_id, `baselines[${index}].baseline_id`, artifactName);
+      expectString(baseline.description, `baselines[${index}].description`, artifactName);
+      expectString(baseline.metric, `baselines[${index}].metric`, artifactName);
+    },
+  );
+
+  expectObjectArray(experiment.experiments, "experiments", artifactName, { minLength: 1 }).forEach(
+    (item, index) => {
+      expectString(item.experiment_id, `experiments[${index}].experiment_id`, artifactName);
+      expectString(item.description, `experiments[${index}].description`, artifactName);
+      expectString(item.result, `experiments[${index}].result`, artifactName);
+    },
+  );
+
+  const compatibility = expectObject(experiment.compatibility, "compatibility", artifactName);
+  expectEnum(compatibility.status, "compatibility.status", artifactName, [
+    "compatible",
+    "limited",
+    "incompatible",
+  ]);
+  expectString(compatibility.notes, "compatibility.notes", artifactName);
+
+  const safety = expectObject(experiment.safety, "safety", artifactName);
+  expectEnum(safety.status, "safety.status", artifactName, [
+    "passed",
+    "warning",
+    "failed",
+  ]);
+  expectStringArray(safety.checks, "safety.checks", artifactName, { minLength: 1 });
+
+  expectString(experiment.conclusion, "conclusion", artifactName);
+
+  return experiment;
+}
+
 export function extractSingleJsonBlock(rawOutput) {
   if (typeof rawOutput !== "string" || rawOutput.trim() === "") {
     throw new ContractValidationError("stage-output", "raw output must be a non-empty string");
@@ -1855,6 +2300,24 @@ export function validateArtifact(artifactType, artifact, context = {}) {
       return validateFinalAssessment(artifact);
     case "pipeline-last-run-summary":
       return validateRunSummary(artifact);
+    case "research-harness-state":
+      return validateResearchHarnessState(artifact);
+    case "context-manifest":
+      return validateContextManifest(artifact);
+    case "agent-trace":
+      return validateAgentTrace(artifact);
+    case "state-store-snapshot":
+      return validateStateStoreSnapshot(artifact);
+    case "cache-observability-report":
+      return validateCacheObservabilityReport(artifact);
+    case "governance-report":
+      return validateGovernanceReport(artifact);
+    case "protocol-dag":
+      return validateProtocolDag(artifact);
+    case "serving-profile":
+      return validateServingProfile(artifact);
+    case "latent-communication-experiment":
+      return validateLatentCommunicationExperiment(artifact);
     default:
       throw new ContractValidationError(
         "validator",

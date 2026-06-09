@@ -1,0 +1,23 @@
+{
+  "version": "1.0",
+  "task_id": "TASK-agent-engineering-001",
+  "compiled_at": "2026-06-08T08:00:00Z",
+  "blocks": [
+    {
+      "id": "system-contracts",
+      "version": "1.0.0",
+      "source": "references/contracts.md",
+      "priority": 10,
+      "tenant_scope": "local",
+      "cacheable": true,
+      "evictable": false,
+      "requires_approval": false,
+      "hash": "sha256:context-contracts"
+    }
+  ],
+  "prompt_diff": {
+    "summary": "Added runtime artifact validators for the landing plan.",
+    "added_blocks": ["system-contracts"],
+    "removed_blocks": []
+  }
+}

@@ -84,6 +84,8 @@ When `verdict` is `reject`, choose `restart_from` based on where the root cause 
 ## Rules
 
 - This stage is read-only. Do not edit files.
+- Rejections and restart decisions are feedback for the orchestrator to route
+  back to the appropriate stage, usually Execution for implementation repairs.
 - Every score must include concrete evidence referencing specific code, tests, docs, or artifacts.
 - The returned JSON must include `readability_conclusion` with exactly `high` or `low`, `complexity_conclusion` with exactly `high` or `low`, and `complexity_summary` explaining the evidence. Do not soften these fields with `medium`, `mixed`, or `unclear`.
 - When previous `final-assessment.json` iterations exist, reference them to verify that prior feedback was addressed.
