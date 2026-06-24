@@ -17,7 +17,7 @@ User request:
 ```json
 {
   "version": "1.0",
-  "applied_skills": ["superpowers"],
+  "applied_skills": [],
   "feature_name": "Responsive dashboard shell refresh",
   "objective": "Improve dashboard navigation and visual hierarchy without changing analytics behavior.",
   "requirements": [
@@ -59,7 +59,7 @@ User request:
 ```json
 {
   "version": "1.0",
-  "applied_skills": ["superpowers"],
+  "applied_skills": [],
   "spec_ref": "spec.json",
   "phases": [
     {
@@ -206,6 +206,50 @@ User request:
 }
 ```
 
+### `complexity-report.json`
+
+```json
+{
+  "version": "1.0",
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "created_at": "2026-04-23T12:20:00Z",
+  "analyzer": {
+    "name": "better_highlights_cognitive_repro",
+    "path": "scripts/better_highlights_cognitive_repro.py",
+    "metric": "better-highlights-like cognitive complexity approximation",
+    "medium_threshold": 15,
+    "high_threshold": 25
+  },
+  "source": {
+    "proposal_path": "/tmp/dashboard-shell-proposal",
+    "changed_files": ["src/layout/DashboardShell.tsx", "src/pages/DashboardPage.tsx"]
+  },
+  "status": "skipped",
+  "analyzed_files": [],
+  "skipped_files": [
+    {
+      "file": "src/layout/DashboardShell.tsx",
+      "reason": "not_python"
+    },
+    {
+      "file": "src/pages/DashboardPage.tsx",
+      "reason": "not_python"
+    }
+  ],
+  "errors": [],
+  "function_count": 0,
+  "max_total_points": 0,
+  "average_total_points": 0,
+  "medium_complexity_functions": 0,
+  "high_complexity_functions": 0,
+  "readability_conclusion": "high",
+  "complexity_conclusion": "low",
+  "summary": "Readability high; complexity low. No changed Python files were available for cognitive complexity analysis.",
+  "functions": []
+}
+```
+
 ### `merge-report.json`
 
 ```json
@@ -222,31 +266,27 @@ User request:
 }
 ```
 
-### `review_individual_1.json`
+### `tree_grading_feedback.json`
 
 ```json
 {
   "version": "1.0",
-  "reviewer_id": 1,
-  "applied_skills": ["ce-frontend-design"],
-  "pre_results": [
-    {
-      "criterion": "Correctness",
-      "score": "pass",
-      "evidence": "Responsive navigation and header hierarchy changes match REQ-001 and REQ-002 in src/layout/DashboardShell.tsx:12 and src/pages/DashboardPage.tsx:8.",
-      "suggestion": null
-    }
-  ],
-  "frontend_design_assessment": {
-    "system_fit": "pass",
-    "interaction_quality": "pass",
-    "ui_accessibility": "warning",
-    "verification_method": "Playwright screenshot + code inspection",
-    "notes": [
-      "Visual system stays aligned with existing spacing and color tokens.",
-      "Add a stronger visible focus ring on the mobile nav toggle."
-    ]
-  }
+  "group_id": "GROUP-1",
+  "iteration": 1,
+  "task_id": "GROUP-1-task",
+  "threshold": 0.8,
+  "require_depth_one_pass": true,
+  "verdict": "pass",
+  "weighted_score": 0.875,
+  "pass_rate": 0.8,
+  "num_branches": 3,
+  "max_depth": 3,
+  "nodes_passed": ["B1-D1-01", "B1-D2-01"],
+  "nodes_failed": ["B2-D3-01"],
+  "blocking_nodes": [],
+  "non_blocking_nodes": ["B2-D3-01"],
+  "node_results": [],
+  "summary": "Tree grading passed with weighted_score 0.875."
 }
 ```
 
@@ -308,14 +348,14 @@ User request:
   "skill_usage_summary": [
     {
       "scope": "spec",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
       "scope": "plan",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
@@ -323,14 +363,11 @@ User request:
       "required_skills": ["ce-frontend-design"],
       "applied_skills": ["ce-frontend-design"],
       "issues": []
-    },
-    {
-      "scope": "GROUP-1/review",
-      "required_skills": ["ce-frontend-design"],
-      "applied_skills": ["ce-frontend-design"],
-      "issues": []
     }
   ],
+  "readability_conclusion": "high",
+  "complexity_conclusion": "low",
+  "complexity_summary": "Complexity reporting skipped the TypeScript-only changes as non-Python, so no high-complexity Python functions were introduced.",
   "summary": "The dashboard shell refresh satisfies the requested scope and remains aligned with the existing design system."
 }
 ```
@@ -347,24 +384,18 @@ User request:
   "skill_usage_summary": [
     {
       "scope": "spec",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
       "scope": "plan",
-      "required_skills": ["superpowers"],
-      "applied_skills": ["superpowers"],
+      "required_skills": [],
+      "applied_skills": [],
       "issues": []
     },
     {
       "scope": "GROUP-1/execution",
-      "required_skills": ["ce-frontend-design"],
-      "applied_skills": ["ce-frontend-design"],
-      "issues": []
-    },
-    {
-      "scope": "GROUP-1/review",
       "required_skills": ["ce-frontend-design"],
       "applied_skills": ["ce-frontend-design"],
       "issues": []
@@ -381,6 +412,31 @@ User request:
       "status": "pass"
     }
   ],
+  "validation_summary": [
+    {
+      "group_id": "GROUP-1",
+      "status": "passed"
+    }
+  ],
+  "complexity_summary": [
+    {
+      "group_id": "GROUP-1",
+      "ref": "complexity/GROUP-1/iteration-1-complexity-report.json",
+      "status": "skipped",
+      "readability_conclusion": "high",
+      "complexity_conclusion": "low",
+      "function_count": 0,
+      "max_total_points": 0
+    }
+  ],
+  "tree_grading_summary": [
+    {
+      "group_id": "GROUP-1",
+      "verdict": "pass",
+      "weighted_score": 0.875,
+      "nodes_failed": ["B2-D3-01"]
+    }
+  ],
   "cleanup_summary": {
     "deleted_workspace": true,
     "deleted_paths": [".pipeline-workspace"],
@@ -391,5 +447,5 @@ User request:
 
 ## Notes
 
-- A real run may contain multiple reviewer outputs, multiple merge iterations, or a `pause_for_human` branch with `conflict-resolution.json`.
+- A real run may contain multiple grader outputs, multiple merge iterations, or a `pause_for_human` branch with `conflict-resolution.json`.
 - When merge pauses, `.pipeline-last-run-summary.json` may still be written, but `.pipeline-workspace/` must stay intact until the run is resolved or rejected.
